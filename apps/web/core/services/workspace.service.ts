@@ -6,6 +6,7 @@
 
 import { API_BASE_URL } from "@plane/constants";
 import type {
+  TViewPointsSummary,
   IWorkspace,
   IWorkspaceMemberMe,
   IWorkspaceMember,
@@ -280,6 +281,15 @@ export class WorkspaceService extends APIService {
       },
       config
     )
+      .then((response) => response?.data)
+      .catch((error) => {
+        throw error?.response?.data;
+      });
+  }
+
+  // aight fork: story point sums for the work items matching a view's filters
+  async getViewIssuesPointsSummary(workspaceSlug: string, params: any, config = {}): Promise<TViewPointsSummary> {
+    return this.get(`/api/workspaces/${workspaceSlug}/issues/points-summary/`, { params }, config)
       .then((response) => response?.data)
       .catch((error) => {
         throw error?.response?.data;

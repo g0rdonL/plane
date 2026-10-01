@@ -13,7 +13,13 @@ from django.db.models import (
     Q,
     Subquery,
     Prefetch,
+    Case,
+    When,
+    Value,
+    Sum,
+    FloatField,
 )
+from django.db.models.functions import Cast
 from django.utils.decorators import method_decorator
 from django.views.decorators.gzip import gzip_page
 from django.db import transaction
@@ -258,6 +264,36 @@ class WorkspaceViewIssuesViewSet(BaseViewSet):
             total_count_queryset=total_issue_count_queryset,
         )
 
+
+    @allow_permission(allowed_roles=[ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST], level="WORKSPACE")
+    def points_summary(self, request, slug):
+        """Story point sums for the work items matching the view's filters (aight fork).
+
+        Uses the same filter pipeline as list(); sums over distinct ids so the
+        project-member join used for permissions cannot double count.
+        """
+        issue_queryset = self.filter_queryset(self.get_queryset())
+        issue_queryset = issue_queryset.filter(**issue_filters(request.query_params, "GET"))
+        issue_queryset = issue_queryset.filter(self._get_project_permission_filters())
+
+        def group_sum(group):
+            return Sum(
+                Case(When(state__group=group, then="points"), default=Value(0.0), output_field=FloatField())
+            )
+
+        totals = (
+            Issue.issue_objects.filter(
+                id__in=issue_queryset.values("id"),
+                estimate_point__estimate__type="points",
+            )
+            .annotate(points=Cast("estimate_point__value", FloatField()))
+            .aggregate(
+                unstarted_estimate_points=group_sum("unstarted"),
+                started_estimate_points=group_sum("started"),
+                completed_estimate_points=group_sum("completed"),
+            )
+        )
+        return Response({k: v or 0 for k, v in totals.items()}, status=status.HTTP_200_OK)
 
 class IssueViewViewSet(BaseViewSet):
     serializer_class = IssueViewSerializer

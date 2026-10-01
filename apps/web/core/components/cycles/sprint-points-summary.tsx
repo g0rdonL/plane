@@ -23,16 +23,18 @@ const BUCKETS = [
   { key: "completed_estimate_points", label: "Done", dot: "bg-[#16A34A]" },
 ] as const;
 
-type Props = {
-  cycle: ICycle | undefined;
+type TPointsValues = Partial<Record<(typeof BUCKETS)[number]["key"], number>>;
+
+type TPointsSummaryProps = {
+  values: TPointsValues | undefined;
   isMobile?: boolean;
   className?: string;
 };
 
-export const SprintPointsSummary = observer(function SprintPointsSummary(props: Props) {
-  const { cycle, isMobile = false, className } = props;
-  if (!cycle) return null;
-  if (BUCKETS.every((b) => cycle[b.key] === undefined)) return null;
+/** Todo / In progress / Done story point chips. Renders nothing until values are loaded. */
+export const PointsSummary = observer(function PointsSummary(props: TPointsSummaryProps) {
+  const { values, isMobile = false, className } = props;
+  if (!values || BUCKETS.every((b) => values[b.key] === undefined)) return null;
 
   return (
     <Tooltip
@@ -51,11 +53,22 @@ export const SprintPointsSummary = observer(function SprintPointsSummary(props: 
           <span key={b.key} className="flex items-center gap-1 whitespace-nowrap">
             <span className={cn("size-1.5 flex-shrink-0 rounded-full", b.dot)} />
             <span>{b.label}</span>
-            <span className="font-semibold text-secondary">{formatPoints(cycle[b.key])}</span>
+            <span className="font-semibold text-secondary">{formatPoints(values[b.key])}</span>
           </span>
         ))}
         <span className="text-placeholder">pts</span>
       </div>
     </Tooltip>
   );
+});
+
+type Props = {
+  cycle: ICycle | undefined;
+  isMobile?: boolean;
+  className?: string;
+};
+
+export const SprintPointsSummary = observer(function SprintPointsSummary(props: Props) {
+  const { cycle, ...rest } = props;
+  return <PointsSummary values={cycle} {...rest} />;
 });

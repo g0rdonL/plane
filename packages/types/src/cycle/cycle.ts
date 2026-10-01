@@ -156,3 +156,10 @@ export type TProgressChartData = {
   ideal: number;
   actual: number;
 }[];
+
+// aight fork: story point sums by state group (Todo / In progress / Done)
+export type TViewPointsSummary = {
+  unstarted_estimate_points: number;
+  started_estimate_points: number;
+  completed_estimate_points: number;
+};

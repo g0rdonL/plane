@@ -15,6 +15,7 @@ import type { EIssueLayoutTypes } from "@plane/types";
 import { EIssuesStoreType, STATIC_VIEW_TYPES } from "@plane/types";
 // assets
 // components
+import { PointsSummary } from "@/components/cycles/sprint-points-summary";
 import { IssuePeekOverview } from "@/components/issues/peek-overview";
 import { WorkspaceActiveLayout } from "@/components/views/helper";
 import { WorkspaceLevelWorkItemFiltersHOC } from "@/components/work-item-filters/filters-hoc/workspace-level";
@@ -44,7 +45,7 @@ export const AllIssueLayoutRoot = observer(function AllIssueLayoutRoot(props: Pr
   // store hooks
   const {
     issuesFilter: { filters, fetchFilters, updateFilterExpression },
-    issues: { clear, groupedIssueIds, fetchIssues, fetchNextIssues },
+    issues: { clear, groupedIssueIds, fetchIssues, fetchNextIssues, pointsSummary },
   } = useIssues(EIssuesStoreType.GLOBAL);
   const { fetchAllGlobalViews, getViewDetailsById } = useGlobalView();
   // Derived values
@@ -138,6 +139,7 @@ export const AllIssueLayoutRoot = observer(function AllIssueLayoutRoot(props: Pr
           label: "Save as",
         }}
         enableUpdateView
+        showOnMount
         entityId={globalViewId}
         entityType={EIssuesStoreType.GLOBAL}
         filtersToShowByLayout={ISSUE_DISPLAY_FILTERS_BY_PAGE.my_issues.filters}
@@ -151,6 +153,7 @@ export const AllIssueLayoutRoot = observer(function AllIssueLayoutRoot(props: Pr
               {globalWorkItemsFilter && (
                 <WorkItemFiltersRow
                   filter={globalWorkItemsFilter}
+                  trailingContent={<PointsSummary values={pointsSummary[globalViewId]} />}
                   trackerElements={{
                     saveView: GLOBAL_VIEW_TRACKER_ELEMENTS.HEADER_SAVE_VIEW_BUTTON,
                   }}

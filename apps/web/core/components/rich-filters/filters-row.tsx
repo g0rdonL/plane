@@ -23,6 +23,8 @@ export type TFiltersRowProps<K extends TFilterProperty, E extends TExternalFilte
   disabledAllOperations?: boolean;
   filter: IFilterInstance<K, E>;
   variant?: "modal" | "header";
+  /** aight fork: extra content shown at the end of the filter bar (e.g. story point sums) */
+  trailingContent?: React.ReactNode;
   trackerElements?: {
     clearFilter?: string;
     saveView?: string;
@@ -38,6 +40,7 @@ export const FiltersRow = observer(function FiltersRow<K extends TFilterProperty
     disabledAllOperations: disabledAllOperationsProp = false,
     filter,
     variant = "header",
+    trailingContent,
     trackerElements,
   } = props;
   // states
@@ -84,6 +87,7 @@ export const FiltersRow = observer(function FiltersRow<K extends TFilterProperty
           isDisabled: disabledAllOperations,
         }}
       />
+      {trailingContent && <div className="ml-auto flex items-center">{trailingContent}</div>}
     </>
   );
 
