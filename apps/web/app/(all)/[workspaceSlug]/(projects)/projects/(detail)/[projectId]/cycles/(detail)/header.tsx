@@ -32,6 +32,7 @@ import { WorkItemsModal } from "@/components/analytics/work-items/modal";
 import { BreadcrumbLink } from "@/components/common/breadcrumb-link";
 import { SwitcherLabel } from "@/components/common/switcher-label";
 import { CycleQuickActions } from "@/components/cycles/quick-actions";
+import { SprintPointsSummary } from "@/components/cycles/sprint-points-summary";
 import {
   DisplayFiltersSelection,
   FiltersDropdown,
@@ -181,6 +182,7 @@ export const CycleIssuesHeader = observer(function CycleIssuesHeader() {
                 </span>
               </Tooltip>
             ) : null}
+            <SprintPointsSummary cycle={cycleDetails ?? undefined} isMobile={isMobile} className="hidden @3xl:flex" />
           </div>
         </Header.LeftItem>
         <Header.RightItem className="items-center">

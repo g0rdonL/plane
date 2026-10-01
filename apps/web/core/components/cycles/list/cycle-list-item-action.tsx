@@ -33,6 +33,7 @@ import { usePlatformOS } from "@/hooks/use-platform-os";
 import { useTimeZoneConverter } from "@/hooks/use-timezone-converter";
 // local imports
 import { CycleQuickActions } from "../quick-actions";
+import { SprintPointsSummary } from "../sprint-points-summary";
 import { TransferIssuesModal } from "../transfer-issues-modal";
 
 type Props = {
@@ -185,6 +186,7 @@ export const CycleListItemAction = observer(function CycleListItemAction(props: 
         <Eye className="my-auto h-4 w-4 text-accent-secondary" />
         <span>{t("project_cycles.more_details")}</span>
       </button>
+      <SprintPointsSummary cycle={cycleDetails} isMobile={isMobile} />
       {showIssueCount && (
         <div className="flex items-center gap-1">
           <WorkItemsIcon className="h-4 w-4 text-tertiary" />

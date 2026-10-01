@@ -25,6 +25,7 @@ from django.db.models import (
     When,
     Sum,
     FloatField,
+    Subquery,
 )
 from django.db import models
 from django.db.models.functions import Coalesce, Cast, Concat
@@ -59,6 +60,31 @@ from plane.utils.cycle_transfer_issues import transfer_cycle_issues
 from .. import BaseAPIView, BaseViewSet
 from plane.bgtasks.webhook_task import model_activity
 from plane.utils.timezone_converter import convert_to_utc, user_timezone_converter
+
+
+
+def sprint_points_subquery(state_group):
+    """Sum of story points for a cycle's work items in one state group (aight fork).
+
+    A subquery keeps the sum independent of the joins used by the Count annotations.
+    """
+    return Coalesce(
+        Subquery(
+            Issue.issue_objects.filter(
+                issue_cycle__cycle_id=OuterRef("pk"),
+                issue_cycle__deleted_at__isnull=True,
+                state__group=state_group,
+                estimate_point__estimate__type="points",
+            )
+            .order_by()
+            .values("issue_cycle__cycle_id")
+            .annotate(points=Sum(Cast("estimate_point__value", FloatField())))
+            .values("points")[:1],
+            output_field=FloatField(),
+        ),
+        Value(0.0),
+        output_field=FloatField(),
+    )
 
 
 class CycleViewSet(BaseViewSet):
@@ -111,6 +137,11 @@ class CycleViewSet(BaseViewSet):
                 )
             )
             .annotate(is_favorite=Exists(favorite_subquery))
+            .annotate(
+                unstarted_estimate_points=sprint_points_subquery("unstarted"),
+                started_estimate_points=sprint_points_subquery("started"),
+                completed_estimate_points=sprint_points_subquery("completed"),
+            )
             .annotate(
                 total_issues=Count(
                     "issue_cycle__issue__id",
@@ -224,6 +255,9 @@ class CycleViewSet(BaseViewSet):
                 "is_favorite",
                 "total_issues",
                 "completed_issues",
+                "unstarted_estimate_points",
+                "started_estimate_points",
+                "completed_estimate_points",
                 "cancelled_issues",
                 "assignee_ids",
                 "status",
@@ -258,6 +292,9 @@ class CycleViewSet(BaseViewSet):
             "total_issues",
             "cancelled_issues",
             "completed_issues",
+            "unstarted_estimate_points",
+            "started_estimate_points",
+            "completed_estimate_points",
             "assignee_ids",
             "status",
             "version",
@@ -300,6 +337,9 @@ class CycleViewSet(BaseViewSet):
                         "is_favorite",
                         "total_issues",
                         "completed_issues",
+                        "unstarted_estimate_points",
+                        "started_estimate_points",
+                        "completed_estimate_points",
                         "assignee_ids",
                         "status",
                         "created_by",
@@ -381,6 +421,9 @@ class CycleViewSet(BaseViewSet):
                 "is_favorite",
                 "total_issues",
                 "completed_issues",
+                "unstarted_estimate_points",
+                "started_estimate_points",
+                "completed_estimate_points",
                 "assignee_ids",
                 "status",
                 "created_by",
@@ -448,6 +491,9 @@ class CycleViewSet(BaseViewSet):
                 "is_favorite",
                 "total_issues",
                 "completed_issues",
+                "unstarted_estimate_points",
+                "started_estimate_points",
+                "completed_estimate_points",
                 "assignee_ids",
                 "status",
                 "created_by",
