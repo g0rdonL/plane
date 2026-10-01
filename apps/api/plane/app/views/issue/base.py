@@ -68,6 +68,7 @@ from plane.utils.grouper import (
     issue_on_results,
     issue_queryset_grouper,
 )
+from plane.utils.epic import epic_request_q, get_epic_type, is_epic_request
 from plane.utils.host import base_host
 from plane.utils.issue_filters import issue_filters
 from plane.utils.order_queryset import order_issue_queryset
@@ -274,7 +275,7 @@ class IssueViewSet(BaseViewSet):
         filters = issue_filters(query_params, "GET")
         order_by_param = request.GET.get("order_by", "-created_at")
 
-        issue_queryset = self.get_queryset()
+        issue_queryset = self.get_queryset().filter(epic_request_q(request))
 
         # Apply rich filters
         issue_queryset = self.filter_queryset(issue_queryset)
@@ -415,7 +416,10 @@ class IssueViewSet(BaseViewSet):
         )
 
         if serializer.is_valid():
-            serializer.save()
+            if is_epic_request(request):
+                serializer.save(type=get_epic_type(project_id))
+            else:
+                serializer.save()
 
             # Track the issue
             issue_activity.delay(
@@ -818,7 +822,9 @@ class IssuePaginatedViewSet(BaseViewSet):
         workspace_slug = self.kwargs.get("slug")
         project_id = self.kwargs.get("project_id")
 
-        issue_queryset = Issue.issue_objects.filter(workspace__slug=workspace_slug, project_id=project_id)
+        issue_queryset = Issue.issue_objects.filter(workspace__slug=workspace_slug, project_id=project_id).filter(
+            epic_request_q(self.request)
+        )
 
         return (
             issue_queryset.select_related("state")
@@ -901,7 +907,9 @@ class IssuePaginatedViewSet(BaseViewSet):
             required_fields.append("description_html")
 
         # querying issues
-        base_queryset = Issue.issue_objects.filter(workspace__slug=slug, project_id=project_id)
+        base_queryset = Issue.issue_objects.filter(workspace__slug=slug, project_id=project_id).filter(
+            epic_request_q(request)
+        )
 
         base_queryset = base_queryset.order_by("updated_at")
         queryset = self.get_queryset().order_by("updated_at")
@@ -1055,8 +1063,10 @@ class IssueDetailEndpoint(BaseAPIView):
             .values("id")
         )
         # Main issue query
-        issue = Issue.issue_objects.filter(workspace__slug=slug, project_id=project_id).filter(
-            Exists(permission_subquery)
+        issue = (
+            Issue.issue_objects.filter(workspace__slug=slug, project_id=project_id)
+            .filter(epic_request_q(request))
+            .filter(Exists(permission_subquery))
         )
 
         # Add additional prefetch based on expand parameter

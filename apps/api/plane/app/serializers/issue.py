@@ -935,12 +935,19 @@ class IssueDetailSerializer(IssueSerializer):
     description_html = serializers.CharField()
     is_subscribed = serializers.BooleanField(read_only=True)
     is_intake = serializers.BooleanField(read_only=True)
+    type_id = serializers.UUIDField(read_only=True)
+    is_epic = serializers.SerializerMethodField()
+
+    def get_is_epic(self, obj):
+        return bool(obj.type_id and obj.type.is_epic)
 
     class Meta(IssueSerializer.Meta):
         fields = IssueSerializer.Meta.fields + [
             "description_html",
             "is_subscribed",
             "is_intake",
+            "type_id",
+            "is_epic",
         ]
         read_only_fields = fields
 

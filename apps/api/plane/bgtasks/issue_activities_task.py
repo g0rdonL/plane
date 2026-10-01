@@ -185,6 +185,34 @@ def track_priority(
         )
 
 
+# Track conversion between work item and epic
+def track_is_epic(
+    requested_data,
+    current_instance,
+    issue_id,
+    project_id,
+    workspace_id,
+    actor_id,
+    issue_activities,
+    epoch,
+):
+    if current_instance.get("is_epic") != requested_data.get("is_epic"):
+        issue_activities.append(
+            IssueActivity(
+                issue_id=issue_id,
+                actor_id=actor_id,
+                verb="updated",
+                old_value="Epic" if current_instance.get("is_epic") else "Work item",
+                new_value="Epic" if requested_data.get("is_epic") else "Work item",
+                field="type",
+                project_id=project_id,
+                workspace_id=workspace_id,
+                comment="converted the work item type to",
+                epoch=epoch,
+            )
+        )
+
+
 # Track changes in state of the issue
 def track_state(
     requested_data,
@@ -614,6 +642,7 @@ def update_issue_activity(
         "estimate_point": track_estimate_points,
         "archived_at": track_archive_at,
         "closed_to": track_closed_to,
+        "is_epic": track_is_epic,
         # External endpoint keys
         "parent": track_parent,
         "state": track_state,
