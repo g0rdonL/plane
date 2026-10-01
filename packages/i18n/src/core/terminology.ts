@@ -5,7 +5,7 @@
  */
 
 /**
- * Aight fork: rename "work item" to "story" in the English UI.
+ * Aight fork: rename "work item" to "story" and "cycle" to "sprint" in the English UI.
  * Applied to translation bundles as they load, so upstream locale files stay untouched.
  * Longest phrases first so "sub-work items" is not caught by "work items".
  */
@@ -20,6 +20,10 @@ const ENGLISH_TERMS: [RegExp, string][] = [
   [/Work Item/g, "Story"],
   [/Work item/g, "Story"],
   [/work item/g, "story"],
+  [/\bCycles\b/g, "Sprints"],
+  [/\bcycles\b/g, "sprints"],
+  [/\bCycle\b/g, "Sprint"],
+  [/\bcycle\b/g, "sprint"],
 ];
 
 export const applyTerminology = (text: string): string =>
