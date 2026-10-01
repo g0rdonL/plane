@@ -5,7 +5,7 @@
  */
 
 import { API_BASE_URL } from "@plane/constants";
-import type { TSprintCapacity } from "@plane/types";
+import type { TSprintCapacity, TSprintCapacityPerson } from "@plane/types";
 import { APIService } from "@/services/api.service";
 
 export class SprintCapacityService extends APIService {
@@ -13,8 +13,16 @@ export class SprintCapacityService extends APIService {
     super(API_BASE_URL);
   }
 
-  async getMySprintCapacity(): Promise<TSprintCapacity> {
-    return this.get(`/api/users/me/sprint-capacity/`)
+  async getSprintCapacity(userId?: string): Promise<TSprintCapacity> {
+    return this.get(`/api/users/me/sprint-capacity/`, { params: userId ? { user_id: userId } : {} })
+      .then((response) => response?.data)
+      .catch((error) => {
+        throw error?.response?.data;
+      });
+  }
+
+  async getPeople(): Promise<TSprintCapacityPerson[]> {
+    return this.get(`/api/users/me/sprint-capacity/people/`)
       .then((response) => response?.data)
       .catch((error) => {
         throw error?.response?.data;

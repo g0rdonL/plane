@@ -5,10 +5,13 @@
  */
 
 import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 // plane imports
 import type { TSprintCapacitySprint } from "@plane/types";
-import { Loader } from "@plane/ui";
+import { CustomSearchSelect, Loader } from "@plane/ui";
+// hooks
+import { useAppRouter } from "@/hooks/use-app-router";
 // services
 import { SprintCapacityService } from "@/services/sprint-capacity.service";
 
@@ -34,7 +37,7 @@ function CapacityBadge({ planned, capacity }: { planned: number; capacity: numbe
   );
 }
 
-function SprintSection({ sprint, capacity }: { sprint: TSprintCapacitySprint; capacity: number }) {
+function SprintSection({ sprint, capacity, isMe }: { sprint: TSprintCapacitySprint; capacity: number; isMe: boolean }) {
   const over = sprint.planned_points > capacity;
   const under = sprint.planned_points < capacity;
   const groups = sprint.items.reduce<Record<string, typeof sprint.items>>((acc, item) => {
@@ -75,9 +78,9 @@ function SprintSection({ sprint, capacity }: { sprint: TSprintCapacitySprint; ca
           )}
         </ul>
       )}
-      {sprint.items.length === 0 ? (
-        <p className="text-13 text-tertiary">Nothing assigned to you in this sprint yet.</p>
-      ) : (
+      {sprint.items.length === 0 && sprint.hidden.count === 0 ? (
+        <p className="text-13 text-tertiary">Nothing assigned{isMe ? " to you" : ""} in this sprint yet.</p>
+      ) : sprint.items.length === 0 ? null : (
         Object.entries(groups).map(([group, items]) => (
           <div key={group} className="space-y-1">
             <p className="text-11 font-medium tracking-wide text-tertiary uppercase">{group}</p>
@@ -104,34 +107,68 @@ function SprintSection({ sprint, capacity }: { sprint: TSprintCapacitySprint; ca
           </div>
         ))
       )}
+      {sprint.hidden.count > 0 && (
+        <p className="rounded-sm bg-layer-2 px-2 py-1.5 text-12 text-secondary">
+          {sprint.hidden.count} {sprint.hidden.count === 1 ? "story" : "stories"} in projects you can&apos;t access ·{" "}
+          {formatPoints(sprint.hidden.points)} pts
+        </p>
+      )}
     </section>
   );
 }
 
 export function MySprintRoot() {
-  const { data, error } = useSWR("MY_SPRINT_CAPACITY", () => service.getMySprintCapacity(), {
+  const router = useAppRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const userId = searchParams.get("user") ?? undefined;
+
+  const { data: people } = useSWR("MY_SPRINT_PEOPLE", () => service.getPeople(), { revalidateOnFocus: false });
+  const { data, error } = useSWR(`MY_SPRINT_CAPACITY_${userId ?? "me"}`, () => service.getSprintCapacity(userId), {
     revalidateOnFocus: true,
   });
 
-  if (error)
-    return <p className="p-6 text-13 text-danger-primary">Could not load your sprints. Refresh to try again.</p>;
-  if (!data)
-    return (
-      <Loader className="space-y-4 p-6">
-        <Loader.Item height="160px" />
-        <Loader.Item height="160px" />
-      </Loader>
-    );
+  const me = people?.find((person) => person.is_me);
+  const options = (people ?? []).map((person) => {
+    const name = person.is_me ? `${person.display_name} (me)` : person.display_name;
+    return {
+      value: person.id,
+      query: `${person.display_name} ${person.first_name} ${person.last_name}`,
+      content: <span className="truncate">{name}</span>,
+    };
+  });
+  const handlePersonChange = (id: string) => router.push(id === me?.id ? pathname : `${pathname}?user=${id}`);
 
   return (
     <div className="h-full w-full overflow-y-auto">
       <div className="mx-auto max-w-4xl space-y-4 p-6">
-        <p className="text-13 text-secondary">
-          Everything assigned to you in this week&apos;s and next week&apos;s sprints, across all workspaces and
-          projects. Plan {data.capacity} points per sprint in total (Plane User Convention).
-        </p>
-        {data.sprints.map((sprint) => (
-          <SprintSection key={sprint.label} sprint={sprint} capacity={data.capacity} />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="max-w-xl text-13 text-secondary">
+            {data?.user.is_me === false
+              ? `${data.user.display_name}'s stories in this week's and next week's sprints, across all workspaces. Stories in projects you can't access are counted but not shown.`
+              : `Everything assigned to you in this week's and next week's sprints, across all workspaces and projects. Plan ${data?.capacity ?? 8} points per sprint in total (Plane User Convention).`}
+          </p>
+          <CustomSearchSelect
+            value={data?.user.id ?? me?.id}
+            onChange={handlePersonChange}
+            options={options}
+            label={
+              <span className="text-13">{data ? (data.user.is_me ? "My sprint" : data.user.display_name) : "…"}</span>
+            }
+            maxHeight="md"
+            placement="bottom-end"
+            noResultsMessage="No teammate found"
+          />
+        </div>
+        {error && <p className="text-13 text-danger-primary">Could not load this sprint. Refresh to try again.</p>}
+        {!data && !error && (
+          <Loader className="space-y-4">
+            <Loader.Item height="160px" />
+            <Loader.Item height="160px" />
+          </Loader>
+        )}
+        {data?.sprints.map((sprint) => (
+          <SprintSection key={sprint.label} sprint={sprint} capacity={data.capacity} isMe={data.user.is_me} />
         ))}
       </div>
     </div>

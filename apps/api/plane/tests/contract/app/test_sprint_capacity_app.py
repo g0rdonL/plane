@@ -101,3 +101,67 @@ class TestSprintCapacity:
     @pytest.mark.django_db
     def test_requires_login(self, api_client):
         assert api_client.get(URL).status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+
+
+def make_user(email, workspace=None, role=15):
+    user = User.objects.create(email=email, username=email.split("@")[0], display_name=email.split("@")[0])
+    if workspace:
+        WorkspaceMember.objects.create(workspace=workspace, member=user, role=role)
+    return user
+
+
+@pytest.mark.contract
+class TestTeammateSprint:
+    @pytest.mark.django_db
+    def test_viewer_sees_only_projects_they_belong_to(self, session_client, workspace, create_user):
+        # target works in a shared project (AAA) and a private one in another workspace (BBB)
+        target = make_user("target@plane.so", workspace)
+        other_ws = Workspace.objects.create(name="Private", owner=target, slug="private-ws")
+        WorkspaceMember.objects.create(workspace=other_ws, member=target, role=20)
+        p1, s1, pts1, c1 = make_project(workspace, create_user, "AAA")
+        ProjectMember.objects.create(project=p1, member=target, workspace=workspace, role=15)
+        p2, s2, pts2, c2 = make_project(other_ws, target, "BBB")
+        make_story(p1, create_user, s1["todo"], c1[0], pts1["2"], assignee=target)
+        make_story(p2, target, s2["todo"], c2[0], pts2["4"], assignee=target)
+
+        response = session_client.get(URL, {"user_id": str(target.id)})
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert response.data["user"]["is_me"] is False
+        current = response.data["sprints"][0]
+        assert current["planned_points"] == 6  # totals include hidden work
+        assert [i["project_identifier"] for i in current["items"]] == ["AAA"]
+        assert current["hidden"] == {"count": 1, "points": 4.0}
+        assert "BBB" not in str(response.data) and "private-ws" not in str(response.data)
+
+    @pytest.mark.django_db
+    def test_guest_only_sees_own_stories_unless_allowed(self, api_client, workspace, create_user):
+        guest = make_user("guest@plane.so", workspace, role=5)
+        p1, s1, pts1, c1 = make_project(workspace, create_user, "AAA")
+        ProjectMember.objects.create(project=p1, member=guest, workspace=workspace, role=5)
+        make_story(p1, create_user, s1["todo"], c1[0], pts1["2"], assignee=create_user)
+        api_client.force_authenticate(user=guest)
+
+        current = api_client.get(URL, {"user_id": str(create_user.id)}).data["sprints"][0]
+        assert current["items"] == [] and current["hidden"]["count"] == 1
+        p1.guest_view_all_features = True
+        p1.save(update_fields=["guest_view_all_features"])
+        current = api_client.get(URL, {"user_id": str(create_user.id)}).data["sprints"][0]
+        assert len(current["items"]) == 1 and current["hidden"]["count"] == 0
+
+    @pytest.mark.django_db
+    def test_stranger_is_not_found(self, session_client, workspace):
+        stranger = make_user("stranger@plane.so")
+        lonely = Workspace.objects.create(name="Lonely", owner=stranger, slug="lonely-ws")
+        WorkspaceMember.objects.create(workspace=lonely, member=stranger, role=20)
+        assert session_client.get(URL, {"user_id": str(stranger.id)}).status_code == status.HTTP_404_NOT_FOUND
+
+    @pytest.mark.django_db
+    def test_people_lists_shared_workspace_members_only(self, session_client, workspace, create_user):
+        teammate = make_user("teammate@plane.so", workspace)
+        stranger = make_user("stranger2@plane.so")
+        bot = make_user("bot@plane.so", workspace)
+        bot.is_bot = True
+        bot.save(update_fields=["is_bot"])
+        ids = {p["id"] for p in session_client.get(URL + "people/").data}
+        assert str(teammate.id) in ids and str(create_user.id) in ids
+        assert str(stranger.id) not in ids and str(bot.id) not in ids

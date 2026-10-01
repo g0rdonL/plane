@@ -53,10 +53,22 @@ export type TSprintCapacitySprint = {
   planned_points: number;
   done_points: number;
   unestimated: number;
+  /** stories in projects the viewer cannot see: counted, not described */
+  hidden: { count: number; points: number };
   items: TSprintCapacityItem[];
+};
+
+export type TSprintCapacityPerson = {
+  id: string;
+  display_name: string;
+  first_name: string;
+  last_name: string;
+  avatar_url: string | null;
+  is_me: boolean;
 };
 
 export type TSprintCapacity = {
   capacity: number;
+  user: { id: string; display_name: string; is_me: boolean };
   sprints: TSprintCapacitySprint[];
 };
