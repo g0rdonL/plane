@@ -158,8 +158,9 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
       return navItems;
     };
 
-    // sort navigation items by sortOrder
-    const sortedNavigationItems = navigationItems(workspaceSlug, projectId).toSorted(
+    // sort navigation items by sortOrder (fresh array, so in-place sort is safe; toSorted needs es2023 lib)
+    // oxlint-disable-next-line unicorn/no-array-sort
+    const sortedNavigationItems = navigationItems(workspaceSlug, projectId).sort(
       (a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)
     );
 

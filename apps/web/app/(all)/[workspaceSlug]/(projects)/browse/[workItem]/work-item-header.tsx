@@ -8,7 +8,7 @@ import React from "react";
 import { observer } from "mobx-react";
 import { useParams } from "next/navigation";
 // plane ui
-import { WorkItemsIcon } from "@plane/propel/icons";
+import { EpicIcon, WorkItemsIcon } from "@plane/propel/icons";
 import { Breadcrumbs, Header } from "@plane/ui";
 // components
 import { BreadcrumbLink } from "@/components/common/breadcrumb-link";
@@ -44,9 +44,15 @@ export const WorkItemDetailsHeader = observer(function WorkItemDetailsHeader() {
           <Breadcrumbs.Item
             component={
               <BreadcrumbLink
-                label="Work Items"
-                href={`/${workspaceSlug}/projects/${projectId}/issues/`}
-                icon={<WorkItemsIcon className="h-4 w-4 text-tertiary" />}
+                label={issueDetails?.is_epic ? "Epics" : "Work Items"}
+                href={`/${workspaceSlug}/projects/${projectId}/${issueDetails?.is_epic ? "epics" : "issues"}/`}
+                icon={
+                  issueDetails?.is_epic ? (
+                    <EpicIcon className="h-4 w-4 text-tertiary" />
+                  ) : (
+                    <WorkItemsIcon className="h-4 w-4 text-tertiary" />
+                  )
+                }
               />
             }
           />

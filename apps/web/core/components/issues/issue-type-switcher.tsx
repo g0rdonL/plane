@@ -72,6 +72,7 @@ export const IssueTypeSwitcher = observer(function IssueTypeSwitcher(props: TIss
     <div className="flex items-center gap-2">
       <CustomMenu
         disabled={disabled || isConverting}
+        closeOnSelect
         customButton={
           <span className="flex items-center gap-1 rounded-sm bg-layer-1 px-2 py-0.5 text-11 font-medium text-secondary">
             <TypeIcon className="size-3.5" />
