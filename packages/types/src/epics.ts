@@ -30,3 +30,33 @@ export type TEpicProgress = TEpicAnalytics & {
   completed_estimate_points: number;
   cancelled_estimate_points: number;
 };
+
+export type TSprintCapacityItem = {
+  id: string;
+  name: string;
+  workspace_slug: string;
+  workspace_name: string;
+  project_id: string;
+  project_identifier: string;
+  project_name: string;
+  sequence_id: number;
+  state_name: string | null;
+  state_group: string | null;
+  points: number | null;
+};
+
+export type TSprintCapacitySprint = {
+  label: string;
+  start_date: string;
+  end_date: string;
+  is_current: boolean;
+  planned_points: number;
+  done_points: number;
+  unestimated: number;
+  items: TSprintCapacityItem[];
+};
+
+export type TSprintCapacity = {
+  capacity: number;
+  sprints: TSprintCapacitySprint[];
+};

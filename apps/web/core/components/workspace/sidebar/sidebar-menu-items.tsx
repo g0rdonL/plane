@@ -74,6 +74,11 @@ export const SidebarMenuItems = observer(function SidebarMenuItems() {
       });
     }
 
+    // Aight fork: cross-workspace sprint capacity, always shown first among personal items
+    if (WORKSPACE_SIDEBAR_STATIC_NAVIGATION_ITEMS["my-sprint"]) {
+      personalItems.push({ ...WORKSPACE_SIDEBAR_STATIC_NAVIGATION_ITEMS["my-sprint"], sort_order: -1 });
+    }
+
     // Sort personal items by sort_order
     personalItems.sort((a, b) => a.sort_order - b.sort_order);
 

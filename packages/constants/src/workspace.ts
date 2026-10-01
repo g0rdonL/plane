@@ -250,6 +250,13 @@ export const WORKSPACE_SIDEBAR_STATIC_NAVIGATION_ITEMS: Record<string, IWorkspac
     access: [EUserWorkspaceRoles.ADMIN, EUserWorkspaceRoles.MEMBER],
     highlight: (pathname: string, url: string) => pathname.includes(url),
   },
+  "my-sprint": {
+    key: "my_sprint",
+    labelTranslationKey: "sidebar.my_sprint",
+    href: `/my-sprint/`,
+    access: [EUserWorkspaceRoles.ADMIN, EUserWorkspaceRoles.MEMBER],
+    highlight: (pathname: string, url: string) => pathname.includes(url),
+  },
   stickies: {
     key: "stickies",
     labelTranslationKey: "sidebar.stickies",

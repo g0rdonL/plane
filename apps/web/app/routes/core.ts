@@ -101,6 +101,11 @@ export const coreRoutes: RouteConfigEntry[] = [
         ]),
 
         // Stickies
+        // My sprint (Aight fork): cross-workspace sprint capacity
+        layout("./(all)/[workspaceSlug]/(projects)/my-sprint/layout.tsx", [
+          route(":workspaceSlug/my-sprint", "./(all)/[workspaceSlug]/(projects)/my-sprint/page.tsx"),
+        ]),
+
         layout("./(all)/[workspaceSlug]/(projects)/stickies/layout.tsx", [
           route(":workspaceSlug/stickies", "./(all)/[workspaceSlug]/(projects)/stickies/page.tsx"),
         ]),

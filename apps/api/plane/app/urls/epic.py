@@ -5,6 +5,7 @@
 from django.urls import path
 
 from plane.app.views.issue.epic import EpicAnalyticsEndpoint, WorkItemConvertEndpoint
+from plane.app.views.issue.sprint_capacity import SprintCapacityEndpoint
 
 PROJECT = "projects/<uuid:project_id>/"
 
@@ -38,6 +39,7 @@ def build_epic_urlpatterns(patterns):
 
 
 urlpatterns = [
+    path("users/me/sprint-capacity/", SprintCapacityEndpoint.as_view(), name="user-sprint-capacity"),
     path(
         "workspaces/<str:slug>/" + PROJECT + "epics/<uuid:epic_id>/analytics/",
         EpicAnalyticsEndpoint.as_view(),
