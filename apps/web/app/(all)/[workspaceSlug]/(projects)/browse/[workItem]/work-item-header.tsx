@@ -44,7 +44,7 @@ export const WorkItemDetailsHeader = observer(function WorkItemDetailsHeader() {
           <Breadcrumbs.Item
             component={
               <BreadcrumbLink
-                label={issueDetails?.is_epic ? "Epics" : "Work Items"}
+                label={issueDetails?.is_epic ? "Epics" : "Stories"}
                 href={`/${workspaceSlug}/projects/${projectId}/${issueDetails?.is_epic ? "epics" : "issues"}/`}
                 icon={
                   issueDetails?.is_epic ? (

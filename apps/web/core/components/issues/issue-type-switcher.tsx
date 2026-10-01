@@ -53,13 +53,13 @@ export const IssueTypeSwitcher = observer(function IssueTypeSwitcher(props: TIss
       setToast({
         type: TOAST_TYPE.SUCCESS,
         title: "Converted",
-        message: toEpic ? "This work item is now an epic." : "This epic is now a work item.",
+        message: toEpic ? "This story is now an epic." : "This epic is now a story.",
       });
     } catch {
       setToast({
         type: TOAST_TYPE.ERROR,
         title: "Error",
-        message: "Could not convert this work item. Please try again.",
+        message: "Could not convert this story. Please try again.",
       });
     } finally {
       setIsConverting(false);
@@ -76,7 +76,7 @@ export const IssueTypeSwitcher = observer(function IssueTypeSwitcher(props: TIss
         customButton={
           <span className="flex items-center gap-1 rounded-sm bg-layer-1 px-2 py-0.5 text-11 font-medium text-secondary">
             <TypeIcon className="size-3.5" />
-            {isEpic ? "Epic" : "Work item"}
+            {isEpic ? "Epic" : "Story"}
           </span>
         }
         placement="bottom-start"
@@ -84,7 +84,7 @@ export const IssueTypeSwitcher = observer(function IssueTypeSwitcher(props: TIss
         <CustomMenu.MenuItem onClick={() => void handleConvert(false)} disabled={!isEpic}>
           <div className="flex items-center gap-2">
             <WorkItemsIcon className="size-3.5" />
-            Work item
+            Story
           </div>
         </CustomMenu.MenuItem>
         <CustomMenu.MenuItem onClick={() => void handleConvert(true)} disabled={isEpic}>

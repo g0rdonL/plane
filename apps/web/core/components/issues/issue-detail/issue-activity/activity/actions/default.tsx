@@ -38,11 +38,11 @@ export const IssueDefaultActivity = observer(function IssueDefaultActivity(props
         {activity.verb === "created" ? (
           source && source !== EInboxIssueSource.IN_APP ? (
             <span>
-              created the work item via{" "}
+              created the story via{" "}
               <span className="font-medium">{capitalizeFirstLetter(source.toLowerCase() || "")}</span>.
             </span>
           ) : (
-            <span> created the work item.</span>
+            <span> created the story.</span>
           )
         ) : (
           <span> deleted a work item.</span>

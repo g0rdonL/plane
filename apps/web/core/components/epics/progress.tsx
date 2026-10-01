@@ -41,7 +41,7 @@ export const EpicProgress = observer(function EpicProgress(props: Props) {
   const {
     subIssues: { subIssuesByIssueId, stateDistributionByIssueId },
   } = useIssueDetail();
-  // refetch whenever the epic's work items or their states change
+  // refetch whenever the epic's stories or their states change
   const revision = JSON.stringify([subIssuesByIssueId(epicId) ?? [], stateDistributionByIssueId(epicId) ?? {}]);
 
   const { data } = useSWR<TEpicProgress>(
@@ -67,7 +67,7 @@ export const EpicProgress = observer(function EpicProgress(props: Props) {
         <h4 className="text-13 font-medium text-primary">Epic progress</h4>
         <div className="flex items-center gap-4 text-12 text-secondary">
           <span>
-            <span className="font-medium text-primary">{completed}</span>/{total} work items done ({percentage}%)
+            <span className="font-medium text-primary">{completed}</span>/{total} stories done ({percentage}%)
           </span>
           {hasPoints && (
             <span>
@@ -88,7 +88,7 @@ export const EpicProgress = observer(function EpicProgress(props: Props) {
                 key={group.key}
                 className="h-full"
                 style={{ width: `${(value / barBase) * 100}%`, backgroundColor: group.color }}
-                title={`${group.label}: ${hasPoints ? `${formatPoints(value)} points` : `${value} work items`}`}
+                title={`${group.label}: ${hasPoints ? `${formatPoints(value)} points` : `${value} stories`}`}
               />
             );
           })}
@@ -104,7 +104,7 @@ export const EpicProgress = observer(function EpicProgress(props: Props) {
       </div>
       {total === 0 && (
         <p className="text-12 text-tertiary">
-          Add work items to this epic below. Progress and story points roll up automatically.
+          Add stories to this epic below. Progress and story points roll up automatically.
         </p>
       )}
     </div>
