@@ -17,6 +17,9 @@ import { SprintCapacityService } from "@/services/sprint-capacity.service";
 
 const service = new SprintCapacityService();
 
+const fullName = (person: { first_name: string; last_name: string; display_name: string }) =>
+  `${person.first_name} ${person.last_name}`.trim() || person.display_name;
+
 const formatPoints = (value: number) => (Number.isInteger(value) ? `${value}` : value.toFixed(1));
 const formatRange = (start: string, end: string) => {
   const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
@@ -130,7 +133,7 @@ export function MySprintRoot() {
 
   const me = people?.find((person) => person.is_me);
   const options = (people ?? []).map((person) => {
-    const name = person.is_me ? `${person.display_name} (me)` : person.display_name;
+    const name = person.is_me ? `${fullName(person)} (me)` : fullName(person);
     return {
       value: person.id,
       query: `${person.display_name} ${person.first_name} ${person.last_name}`,
@@ -145,7 +148,7 @@ export function MySprintRoot() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="max-w-xl text-13 text-secondary">
             {data?.user.is_me === false
-              ? `${data.user.display_name}'s stories in this week's and next week's sprints, across all workspaces. Stories in projects you can't access are counted but not shown.`
+              ? `${data.user.full_name}'s stories in this week's and next week's sprints, across all workspaces. Stories in projects you can't access are counted but not shown.`
               : `Everything assigned to you in this week's and next week's sprints, across all workspaces and projects. Plan ${data?.capacity ?? 8} points per sprint in total (Plane User Convention).`}
           </p>
           <CustomSearchSelect
@@ -153,7 +156,7 @@ export function MySprintRoot() {
             onChange={handlePersonChange}
             options={options}
             label={
-              <span className="text-13">{data ? (data.user.is_me ? "My sprint" : data.user.display_name) : "…"}</span>
+              <span className="text-13">{data ? (data.user.is_me ? "My sprint" : data.user.full_name) : "…"}</span>
             }
             maxHeight="md"
             placement="bottom-end"

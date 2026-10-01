@@ -69,6 +69,6 @@ export type TSprintCapacityPerson = {
 
 export type TSprintCapacity = {
   capacity: number;
-  user: { id: string; display_name: string; is_me: boolean };
+  user: { id: string; display_name: string; full_name: string; is_me: boolean };
   sprints: TSprintCapacitySprint[];
 };

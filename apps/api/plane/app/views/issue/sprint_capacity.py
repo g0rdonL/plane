@@ -143,7 +143,12 @@ class SprintCapacityEndpoint(BaseAPIView):
         return Response(
             {
                 "capacity": SPRINT_CAPACITY,
-                "user": {"id": str(target.id), "display_name": target.display_name, "is_me": target.id == viewer.id},
+                "user": {
+                    "id": str(target.id),
+                    "display_name": target.display_name,
+                    "full_name": f"{target.first_name} {target.last_name}".strip() or target.display_name,
+                    "is_me": target.id == viewer.id,
+                },
                 "sprints": sprints,
             },
             status=status.HTTP_200_OK,
@@ -165,7 +170,7 @@ class SprintCapacityPeopleEndpoint(BaseAPIView):
                 is_bot=False,
             )
             .distinct()
-            .order_by("display_name")
+            .order_by("first_name", "last_name", "display_name")
         )
         return Response(
             [
