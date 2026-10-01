@@ -9,6 +9,7 @@ from django.db.models import Q
 from django_filters import FilterSet, filters
 
 from plane.db.models import Issue
+from plane.utils.sprint import sprint_issue_q
 
 
 class UUIDInFilter(filters.BaseInFilter, filters.UUIDFilter):
@@ -140,6 +141,9 @@ class IssueFilterSet(BaseFilterSet):
 
     cycle_id = filters.UUIDFilter(method="filter_cycle_id")
     cycle_id__in = UUIDInFilter(method="filter_cycle_id_in", lookup_expr="in")
+    # Aight fork: relative sprint filter ("current" / "next" Monday-Sunday week)
+    sprint = filters.CharFilter(method="filter_sprint")
+    sprint__in = CharInFilter(method="filter_sprint_in", lookup_expr="in")
 
     module_id = filters.UUIDFilter(method="filter_module_id")
     module_id__in = UUIDInFilter(method="filter_module_id_in", lookup_expr="in")
@@ -239,6 +243,12 @@ class IssueFilterSet(BaseFilterSet):
             issue_cycle__cycle_id__in=value,
             issue_cycle__deleted_at__isnull=True,
         )
+
+    def filter_sprint(self, queryset, name, value):
+        return sprint_issue_q([value])
+
+    def filter_sprint_in(self, queryset, name, value):
+        return sprint_issue_q(value)
 
     def filter_module_id(self, queryset, name, value):
         """Filter by module ID, excluding soft deleted modules"""

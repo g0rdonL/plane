@@ -180,6 +180,7 @@ export const ISSUE_DISPLAY_FILTERS_BY_PAGE: TIssueFiltersToDisplayByPageType = {
       "project_id",
       "start_date",
       "target_date",
+      "sprint",
     ],
     layoutOptions: {
       spreadsheet: {
@@ -218,6 +219,7 @@ export const ISSUE_DISPLAY_FILTERS_BY_PAGE: TIssueFiltersToDisplayByPageType = {
       "label_id",
       "start_date",
       "target_date",
+      "sprint",
     ],
     layoutOptions: {
       list: {

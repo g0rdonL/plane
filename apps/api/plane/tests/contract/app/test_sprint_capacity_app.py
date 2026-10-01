@@ -165,3 +165,39 @@ class TestTeammateSprint:
         ids = {p["id"] for p in session_client.get(URL + "people/").data}
         assert str(teammate.id) in ids and str(create_user.id) in ids
         assert str(stranger.id) not in ids and str(bot.id) not in ids
+
+
+def collect_ids(payload):
+    ids = set()
+    if isinstance(payload, dict):
+        if "id" in payload and "name" in payload:
+            ids.add(str(payload["id"]))
+        for value in payload.values():
+            ids |= collect_ids(value)
+    elif isinstance(payload, list):
+        for value in payload:
+            ids |= collect_ids(value)
+    return ids
+
+
+@pytest.mark.contract
+class TestSprintRichFilter:
+    @pytest.mark.django_db
+    def test_workspace_view_filters_by_relative_sprint(self, session_client, workspace, create_user):
+        import json
+
+        p1, s1, pts1, c1 = make_project(workspace, create_user, "AAA")
+        now_story = make_story(p1, create_user, s1["todo"], c1[0], pts1["2"], assignee=create_user)
+        next_story = make_story(p1, create_user, s1["todo"], c1[1], pts1["1"], assignee=create_user)
+        url = f"/api/workspaces/{workspace.slug}/issues/"
+
+        def ids(expr):
+            r = session_client.get(url, {"filters": json.dumps(expr)})
+            assert r.status_code == status.HTTP_200_OK, r.data
+            return collect_ids(r.data)
+
+        assert ids({"sprint__in": "current"}) >= {str(now_story.id)}
+        assert str(next_story.id) not in ids({"sprint__in": "current"})
+        assert str(next_story.id) in ids({"sprint__in": "next"})
+        both = ids({"and": [{"sprint__in": "current,next"}, {"assignee_id__in": str(create_user.id)}]})
+        assert {str(now_story.id), str(next_story.id)} <= both

@@ -4,6 +4,8 @@
  * See the LICENSE file for details.
  */
 
+/* eslint-disable no-shadow -- pre-existing upstream shadowing */
+
 import { useCallback, useMemo } from "react";
 import { AtSign, Briefcase } from "lucide-react";
 // plane imports
@@ -44,6 +46,7 @@ import {
   getMentionFilterConfig,
   getModuleFilterConfig,
   getPriorityFilterConfig,
+  getSprintFilterConfig,
   getProjectFilterConfig,
   getStartDateFilterConfig,
   getStateFilterConfig,
@@ -293,6 +296,18 @@ export const useWorkItemFiltersConfig = (props: TUseWorkItemFiltersConfigProps):
     [isFilterEnabled, members, operatorConfigs]
   );
 
+  // sprint filter config (Aight fork): relative "This sprint" / "Next sprint"
+  const sprintFilterConfig = useMemo(
+    () =>
+      getSprintFilterConfig<TWorkItemFilterProperty>("sprint")({
+        isEnabled: isFilterEnabled("sprint"),
+        filterIcon: CycleIcon,
+        getOptionIcon: () => <CycleIcon className="h-3 w-3 flex-shrink-0" />,
+        ...operatorConfigs,
+      }),
+    [isFilterEnabled, operatorConfigs]
+  );
+
   // priority filter config
   const priorityFilterConfig = useMemo(
     () =>
@@ -365,6 +380,7 @@ export const useWorkItemFiltersConfig = (props: TUseWorkItemFiltersConfigProps):
   return {
     areAllConfigsInitialized,
     configs: [
+      sprintFilterConfig,
       stateFilterConfig,
       stateGroupFilterConfig,
       assigneeFilterConfig,
@@ -397,6 +413,7 @@ export const useWorkItemFiltersConfig = (props: TUseWorkItemFiltersConfigProps):
       target_date: targetDateFilterConfig,
       created_at: createdAtFilterConfig,
       updated_at: updatedAtFilterConfig,
+      sprint: sprintFilterConfig,
     },
     isFilterEnabled,
     members: members ?? [],
