@@ -11,6 +11,7 @@ import type {
   TIssueParams,
   IIssueDisplayProperties,
   TBulkOperationsPayload,
+  TEpicProgress,
   TIssue,
   TIssueActivity,
   TIssueLink,
@@ -121,6 +122,29 @@ export class IssueService extends APIService {
         }
         return response?.data;
       })
+      .catch((error) => {
+        throw error?.response?.data;
+      });
+  }
+
+  async convertWorkItem(
+    workspaceSlug: string,
+    projectId: string,
+    issueId: string,
+    isEpic: boolean
+  ): Promise<{ id: string; is_epic: boolean }> {
+    return this.post(`/api/workspaces/${workspaceSlug}/projects/${projectId}/issues/${issueId}/convert/`, {
+      is_epic: isEpic,
+    })
+      .then((response) => response?.data)
+      .catch((error) => {
+        throw error?.response?.data;
+      });
+  }
+
+  async getEpicProgress(workspaceSlug: string, projectId: string, epicId: string): Promise<TEpicProgress> {
+    return this.get(`/api/workspaces/${workspaceSlug}/projects/${projectId}/epics/${epicId}/analytics/`)
+      .then((response) => response?.data)
       .catch((error) => {
         throw error?.response?.data;
       });

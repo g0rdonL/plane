@@ -24,6 +24,7 @@ import useSize from "@/hooks/use-window-size";
 // services
 import { WorkItemVersionService } from "@/services/issue";
 // local imports
+import { EpicProgress } from "@/components/epics/progress";
 import { IssueDetailWidgets } from "../issue-detail-widgets";
 import { NameDescriptionUpdateStatus } from "../issue-update-status";
 import { PeekOverviewProperties } from "../peek-overview/properties";
@@ -161,6 +162,8 @@ export const IssueMainContent = observer(function IssueMainContent(props: Props)
           )}
         </div>
       </div>
+
+      {issue.is_epic && <EpicProgress workspaceSlug={workspaceSlug} projectId={projectId} epicId={issueId} />}
 
       <IssueDetailWidgets
         workspaceSlug={workspaceSlug}

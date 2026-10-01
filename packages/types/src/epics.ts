@@ -20,3 +20,13 @@ export type TEpicAnalytics = {
   cancelled_issues: number;
   overdue_issues: number;
 };
+
+export type TEpicProgress = TEpicAnalytics & {
+  total_issues: number;
+  total_estimate_points: number;
+  backlog_estimate_points: number;
+  unstarted_estimate_points: number;
+  started_estimate_points: number;
+  completed_estimate_points: number;
+  cancelled_estimate_points: number;
+};

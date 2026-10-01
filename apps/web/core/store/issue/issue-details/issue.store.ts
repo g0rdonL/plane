@@ -103,6 +103,7 @@ export class IssueStore implements IIssueStore {
     if (issue && issue?.parent && issue?.parent?.id && issue?.parent?.project_id) {
       this.issueService.retrieve(workspaceSlug, issue.parent.project_id, issue?.parent?.id).then((res) => {
         this.rootIssueDetailStore.rootIssueStore.issues.addIssue([res]);
+        return res;
       });
     }
     // assignees
@@ -275,9 +276,11 @@ export class IssueStore implements IIssueStore {
     const issueIdentifier = `${project_identifier}-${sequence_id}`;
     const issueId = issue?.id;
     const projectId = issue?.project_id;
-    const rootWorkItemDetailStore = issue?.is_epic
-      ? this.rootIssueDetailStore.rootIssueStore.epicDetail
-      : this.rootIssueDetailStore.rootIssueStore.issueDetail;
+    // The detail page renders epics with the work item UI, so only the epic service populates the epic store.
+    const rootWorkItemDetailStore =
+      this.serviceType === EIssueServiceType.EPICS
+        ? this.rootIssueDetailStore.rootIssueStore.epicDetail
+        : this.rootIssueDetailStore.rootIssueStore.issueDetail;
 
     if (!issue || !projectId || !issueId) throw new Error("Issue not found");
 
@@ -288,6 +291,7 @@ export class IssueStore implements IIssueStore {
     if (issue?.parent && issue?.parent?.id && issue?.parent?.project_id) {
       this.issueService.retrieve(workspaceSlug, issue.parent.project_id, issue.parent.id).then((res) => {
         this.rootIssueDetailStore.rootIssueStore.issues.addIssue([res]);
+        return res;
       });
     }
 

@@ -4,6 +4,8 @@
  * See the LICENSE file for details.
  */
 
+/* eslint-disable no-shadow -- pre-existing upstream shadowing */
+
 import { useEffect, useRef, useState } from "react";
 import { isEqual, xor } from "lodash-es";
 import { observer } from "mobx-react";
@@ -53,8 +55,8 @@ export const CreateUpdateIssueModalBase = observer(function CreateUpdateIssueMod
   const issueStoreType = useIssueStoreType();
 
   let storeType = issueStoreFromProps ?? issueStoreType;
-  // Fallback to project store if epic store is used in issue modal.
-  if (storeType === EIssuesStoreType.EPIC) {
+  // Fallback to project store if epic store is used in issue modal, unless the caller explicitly creates an epic.
+  if (storeType === EIssuesStoreType.EPIC && issueStoreFromProps !== EIssuesStoreType.EPIC) {
     storeType = EIssuesStoreType.PROJECT;
   }
   // ref
