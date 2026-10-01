@@ -40,7 +40,7 @@ export const PointsSummary = observer(function PointsSummary(props: TPointsSumma
     <Tooltip
       isMobile={isMobile}
       tooltipHeading="Story points"
-      tooltipContent="Todo · In progress (In Progress + In Review) · Done"
+      tooltipContent="Includes sub-work items. In progress = In Progress + In Review."
       position="bottom"
     >
       <div

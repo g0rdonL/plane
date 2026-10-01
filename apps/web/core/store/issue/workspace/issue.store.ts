@@ -115,6 +115,8 @@ export class WorkspaceIssues extends BaseIssuesStore implements IWorkspaceIssues
     };
     delete params.cursor;
     delete params.per_page;
+    // count sub-work items too: stories under epics carry the points, even when the list hides them
+    params.sub_issue = true;
     try {
       const summary = await this.workspaceService.getViewIssuesPointsSummary(workspaceSlug, params);
       runInAction(() => {
