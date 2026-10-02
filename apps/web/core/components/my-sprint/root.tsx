@@ -4,12 +4,15 @@
  * See the LICENSE file for details.
  */
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 // plane imports
-import type { TSprintCapacitySprint } from "@plane/types";
-import { CustomSearchSelect, Loader } from "@plane/ui";
+import { Button } from "@plane/propel/button";
+import { TOAST_TYPE, setToast } from "@plane/propel/toast";
+import type { TSprintCapacity, TSprintCapacitySprint } from "@plane/types";
+import { CustomSearchSelect, Input, Loader } from "@plane/ui";
 // hooks
 import { useAppRouter } from "@/hooks/use-app-router";
 // services
@@ -26,23 +29,101 @@ const formatRange = (start: string, end: string) => {
   return `${new Date(`${start}T00:00:00`).toLocaleDateString("en-GB", opts)} – ${new Date(`${end}T00:00:00`).toLocaleDateString("en-GB", opts)}`;
 };
 
-function CapacityBadge({ planned, capacity }: { planned: number; capacity: number }) {
+function CapacityBadge({ used, capacity, suffix }: { used: number; capacity: number; suffix: string }) {
   const tone =
-    planned > capacity
+    used > capacity
       ? "bg-danger-subtle text-danger-primary"
-      : planned === capacity
+      : used === capacity && capacity > 0
         ? "bg-success-subtle text-success-primary"
         : "bg-layer-2 text-secondary";
   return (
-    <span className={`rounded-full px-3 py-1 text-13 font-semibold ${tone}`}>
-      {formatPoints(planned)} / {capacity} pts
+    <span className={`rounded-full px-3 py-1 text-13 font-semibold whitespace-nowrap ${tone}`}>
+      {formatPoints(used)} / {capacity} {suffix}
     </span>
   );
 }
 
-function SprintSection({ sprint, capacity, isMe }: { sprint: TSprintCapacitySprint; capacity: number; isMe: boolean }) {
+function PointsField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <label className="flex items-center gap-1.5 text-12 text-secondary">
+      {label}
+      <Input
+        type="number"
+        min={0}
+        max={40}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-16"
+        inputSize="xs"
+      />
+    </label>
+  );
+}
+
+function CapacitySettings({ data, onSaved }: { data: TSprintCapacity; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [planned, setPlanned] = useState(`${data.capacity}`);
+  const [buffer, setBuffer] = useState(`${data.buffer_capacity}`);
+  const [saving, setSaving] = useState(false);
+
+  const open = () => {
+    setPlanned(`${data.capacity}`);
+    setBuffer(`${data.buffer_capacity}`);
+    setEditing(true);
+  };
+  const save = async () => {
+    setSaving(true);
+    try {
+      await service.updateMyCapacity({ planned: Number(planned), buffer: Number(buffer) });
+      setEditing(false);
+      onSaved();
+    } catch (error) {
+      setToast({
+        type: TOAST_TYPE.ERROR,
+        title: "Could not save",
+        message: (error as { error?: string })?.error ?? "Use whole numbers from 0 to 40.",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing)
+    return (
+      <button type="button" onClick={open} className="text-12 text-accent-primary hover:underline">
+        Set my points
+      </button>
+    );
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-subtle bg-layer-1 px-3 py-2">
+      <PointsField label="Planned" value={planned} onChange={setPlanned} />
+      <PointsField label="Buffer" value={buffer} onChange={setBuffer} />
+      <span className="text-11 text-tertiary">pts per sprint · 1 pt = half a day</span>
+      <Button variant="primary" onClick={save} loading={saving}>
+        Save
+      </Button>
+      <Button variant="secondary" onClick={() => setEditing(false)}>
+        Cancel
+      </Button>
+    </div>
+  );
+}
+
+function SprintSection({
+  sprint,
+  capacity,
+  bufferCapacity,
+  isMe,
+}: {
+  sprint: TSprintCapacitySprint;
+  capacity: number;
+  bufferCapacity: number;
+  isMe: boolean;
+}) {
   const over = sprint.planned_points > capacity;
   const under = sprint.planned_points < capacity;
+  const bufferOver = sprint.buffer_points > bufferCapacity;
   const groups = sprint.items.reduce<Record<string, typeof sprint.items>>((acc, item) => {
     const key = `${item.workspace_name} / ${item.project_name}`;
     (acc[key] ||= []).push(item);
@@ -60,9 +141,13 @@ function SprintSection({ sprint, capacity, isMe }: { sprint: TSprintCapacitySpri
             {formatRange(sprint.start_date, sprint.end_date)} · {formatPoints(sprint.done_points)} pts done
           </p>
         </div>
-        <CapacityBadge planned={sprint.planned_points} capacity={capacity} />
+        <div className="flex items-center gap-1.5">
+          <CapacityBadge used={sprint.planned_points} capacity={capacity} suffix="pts" />
+          <span className="text-13 text-tertiary">+</span>
+          <CapacityBadge used={sprint.buffer_points} capacity={bufferCapacity} suffix="buffer" />
+        </div>
       </div>
-      {(over || under || sprint.unestimated > 0) && (
+      {(over || under || bufferOver || sprint.unestimated > 0) && (
         <ul className="space-y-0.5 text-12">
           {over && (
             <li className="text-danger-primary">
@@ -72,6 +157,12 @@ function SprintSection({ sprint, capacity, isMe }: { sprint: TSprintCapacitySpri
           {under && !sprint.is_current && (
             <li className="text-secondary">
               {formatPoints(capacity - sprint.planned_points)} pts left to plan before Friday 17:00.
+            </li>
+          )}
+          {bufferOver && (
+            <li className="text-danger-primary">
+              Buffer used up by {formatPoints(sprint.buffer_points - bufferCapacity)} pts: something planned has to
+              give.
             </li>
           )}
           {sprint.unestimated > 0 && (
@@ -101,6 +192,14 @@ function SprintSection({ sprint, capacity, isMe }: { sprint: TSprintCapacitySpri
                 >
                   {item.name}
                 </span>
+                {item.is_buffer && (
+                  <span
+                    className="flex-shrink-0 rounded-sm bg-warning-subtle px-1.5 text-11 text-warning-primary"
+                    title="Added on or after Tuesday 00:00, so it uses the buffer"
+                  >
+                    buffer
+                  </span>
+                )}
                 <span className="w-24 flex-shrink-0 text-right text-12 text-secondary">{item.state_name}</span>
                 <span className="w-12 flex-shrink-0 text-right text-12 font-medium text-primary">
                   {item.points === null ? "–" : `${formatPoints(item.points)} pts`}
@@ -127,9 +226,13 @@ export function MySprintRoot() {
   const userId = searchParams.get("user") ?? undefined;
 
   const { data: people } = useSWR("MY_SPRINT_PEOPLE", () => service.getPeople(), { revalidateOnFocus: false });
-  const { data, error } = useSWR(`MY_SPRINT_CAPACITY_${userId ?? "me"}`, () => service.getSprintCapacity(userId), {
-    revalidateOnFocus: true,
-  });
+  const { data, error, mutate } = useSWR(
+    `MY_SPRINT_CAPACITY_${userId ?? "me"}`,
+    () => service.getSprintCapacity(userId),
+    {
+      revalidateOnFocus: true,
+    }
+  );
 
   const me = people?.find((person) => person.is_me);
   const options = (people ?? []).map((person) => {
@@ -149,7 +252,7 @@ export function MySprintRoot() {
           <p className="max-w-xl text-13 text-secondary">
             {data?.user.is_me === false
               ? `${data.user.full_name}'s stories in this week's and next week's sprints, across all workspaces. Stories in projects you can't access are counted but not shown.`
-              : `Everything assigned to you in this week's and next week's sprints, across all workspaces and projects. Plan ${data?.capacity ?? 8} points per sprint in total (Plane User Convention).`}
+              : `Everything assigned to you in this week's and next week's sprints, across all workspaces and projects. Plan ${data?.capacity ?? 8} points per sprint in total; stories added from Tuesday 00:00 use your ${data?.buffer_capacity ?? 2}-point buffer (Plane User Convention).`}
           </p>
           <CustomSearchSelect
             value={data?.user.id ?? me?.id}
@@ -163,6 +266,7 @@ export function MySprintRoot() {
             noResultsMessage="No teammate found"
           />
         </div>
+        {data?.user.is_me && <CapacitySettings data={data} onSaved={() => void mutate()} />}
         {error && <p className="text-13 text-danger-primary">Could not load this sprint. Refresh to try again.</p>}
         {!data && !error && (
           <Loader className="space-y-4">
@@ -171,7 +275,13 @@ export function MySprintRoot() {
           </Loader>
         )}
         {data?.sprints.map((sprint) => (
-          <SprintSection key={sprint.label} sprint={sprint} capacity={data.capacity} isMe={data.user.is_me} />
+          <SprintSection
+            key={sprint.label}
+            sprint={sprint}
+            capacity={data.capacity}
+            bufferCapacity={data.buffer_capacity}
+            isMe={data.user.is_me}
+          />
         ))}
       </div>
     </div>

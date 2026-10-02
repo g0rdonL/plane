@@ -17,8 +17,10 @@ from plane.db.models import (
     Estimate,
     EstimatePoint,
     Issue,
+    IssueActivity,
     IssueAssignee,
     IssueType,
+    Profile,
     Project,
     ProjectMember,
     State,
@@ -53,12 +55,14 @@ def make_project(workspace, user, identifier):
     return project, states, points, cycles
 
 
-def make_story(project, user, state, cycle, point=None, assignee=None, epic_type=None):
+def make_story(project, user, state, cycle, point=None, assignee=None, epic_type=None, added_at=None):
     issue = Issue(name="story", project=project, workspace=project.workspace, state=state, estimate_point=point, type=epic_type)
     issue.save(created_by_id=user.id)
     if assignee:
         IssueAssignee.objects.create(issue=issue, assignee=assignee, project=project, workspace=project.workspace)
-    CycleIssue.objects.create(issue=issue, cycle=cycle, project=project, workspace=project.workspace)
+    link = CycleIssue.objects.create(issue=issue, cycle=cycle, project=project, workspace=project.workspace)
+    # planned on Monday unless told otherwise, so results don't depend on the weekday the tests run
+    CycleIssue.objects.filter(pk=link.pk).update(created_at=added_at or cycle.start_date)
     return issue
 
 
@@ -84,6 +88,7 @@ class TestSprintCapacity:
         response = session_client.get(URL)
         assert response.status_code == status.HTTP_200_OK, response.data
         assert response.data["capacity"] == 8
+        assert response.data["buffer_capacity"] == 2
         current, upcoming = response.data["sprints"]
 
         assert current["is_current"] is True
@@ -97,6 +102,38 @@ class TestSprintCapacity:
         assert upcoming["is_current"] is False
         assert upcoming["planned_points"] == 1
         assert len(upcoming["items"]) == 1
+
+    @pytest.mark.django_db
+    def test_stories_added_from_tuesday_count_as_buffer(self, session_client, workspace, create_user):
+        p1, s1, pts1, c1 = make_project(workspace, create_user, "AAA")
+        tuesday = c1[0].start_date + dt.timedelta(days=1)
+        make_story(p1, create_user, s1["todo"], c1[0], pts1["4"], assignee=create_user)  # planned Monday
+        make_story(p1, create_user, s1["todo"], c1[0], pts1["1"], assignee=create_user, added_at=tuesday)
+        # linked last week, moved into this sprint on Wednesday: the activity log decides
+        moved = make_story(p1, create_user, s1["todo"], c1[0], pts1["2"], assignee=create_user,
+                           added_at=c1[0].start_date - dt.timedelta(days=3))
+        activity = IssueActivity.objects.create(issue=moved, project=p1, workspace=workspace, verb="updated",
+                                                field="cycles", new_identifier=c1[0].id, actor=create_user)
+        IssueActivity.objects.filter(pk=activity.pk).update(created_at=tuesday + dt.timedelta(days=1))
+
+        current = session_client.get(URL).data["sprints"][0]
+        assert current["planned_points"] == 4
+        assert current["buffer_points"] == 3
+        assert sorted(i["points"] for i in current["items"] if i["is_buffer"]) == [1, 2]
+
+    @pytest.mark.django_db
+    def test_people_set_their_own_capacity(self, session_client, workspace, create_user):
+        response = session_client.patch(URL, {"planned": 4, "buffer": 1}, format="json")
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert Profile.objects.get(user=create_user).goals["sprint_capacity"] == {"planned": 4, "buffer": 1}
+        data = session_client.get(URL).data
+        assert (data["capacity"], data["buffer_capacity"]) == (4, 1)
+        assert session_client.patch(URL, {"buffer": 3}, format="json").data == {"capacity": 4, "buffer_capacity": 3}
+        for bad in ({"planned": -1}, {"planned": "x"}, {"buffer": 41}, {"planned": 2.5}, {"planned": True}):
+            assert session_client.patch(URL, bad, format="json").status_code == status.HTTP_400_BAD_REQUEST
+
+        teammate = make_user("teammate3@plane.so", workspace)
+        assert session_client.get(URL, {"user_id": str(teammate.id)}).data["capacity"] == 8  # default
 
     @pytest.mark.django_db
     def test_requires_login(self, api_client):

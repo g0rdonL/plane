@@ -43,6 +43,8 @@ export type TSprintCapacityItem = {
   state_name: string | null;
   state_group: string | null;
   points: number | null;
+  /** entered the sprint on or after Tuesday 00:00 HKT, so it uses the buffer */
+  is_buffer: boolean;
 };
 
 export type TSprintCapacitySprint = {
@@ -51,6 +53,9 @@ export type TSprintCapacitySprint = {
   end_date: string;
   is_current: boolean;
   planned_points: number;
+  buffer_points: number;
+  /** ISO time from which stories added to this sprint count against the buffer */
+  buffer_from: string;
   done_points: number;
   unestimated: number;
   /** stories in projects the viewer cannot see: counted, not described */
@@ -67,8 +72,14 @@ export type TSprintCapacityPerson = {
   is_me: boolean;
 };
 
-export type TSprintCapacity = {
+export type TSprintCapacitySettings = {
+  /** planned points per sprint */
   capacity: number;
+  /** buffer points per sprint for work added from Tuesday */
+  buffer_capacity: number;
+};
+
+export type TSprintCapacity = TSprintCapacitySettings & {
   user: { id: string; display_name: string; full_name: string; is_me: boolean };
   sprints: TSprintCapacitySprint[];
 };

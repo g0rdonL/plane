@@ -7,6 +7,8 @@ import datetime as dt
 import zoneinfo
 
 # Django imports
+from django.db.models import OuterRef, Subquery
+from django.db.models.functions import Greatest
 from django.utils import timezone
 
 # Third Party imports
@@ -15,13 +17,29 @@ from rest_framework.response import Response
 
 # Module imports
 from .. import BaseAPIView
-from plane.db.models import Cycle, Issue, ProjectMember, User, WorkspaceMember
+from plane.db.models import Cycle, CycleIssue, Issue, IssueActivity, Profile, ProjectMember, User, WorkspaceMember
 
-# Aight fork: sprints are weekly, Monday 00:00 to Sunday 23:59 Hong Kong time, and each IC plans
-# 8 points per sprint across every workspace and project (Plane User Convention).
+# Aight fork: sprints are weekly, Monday 00:00 to Sunday 23:59 Hong Kong time. By default each IC plans
+# 8 points per sprint across every workspace and project, plus a 2-point buffer for unplanned work
+# (Plane User Convention). Part-timers set their own numbers, stored in Profile.goals["sprint_capacity"]
+# (an unused CE field, so no migration). A story counts against the buffer when it entered the sprint
+# on or after Tuesday 00:00 of that sprint week.
 SPRINT_TZ = zoneinfo.ZoneInfo("Asia/Hong_Kong")
 SPRINT_CAPACITY = 8
+SPRINT_BUFFER = 2
+BUFFER_CUTOFF = dt.timedelta(days=1)
+MAX_POINTS = 40
 GUEST = 5
+
+
+def get_capacity(user):
+    goals = Profile.objects.filter(user=user).values_list("goals", flat=True).first() or {}
+    saved = goals.get("sprint_capacity") if isinstance(goals, dict) else None
+    saved = saved if isinstance(saved, dict) else {}
+    return {
+        "planned": saved.get("planned", SPRINT_CAPACITY),
+        "buffer": saved.get("buffer", SPRINT_BUFFER),
+    }
 
 
 def _points(issue):
@@ -84,6 +102,19 @@ class SprintCapacityEndpoint(BaseAPIView):
             week_start = dt.datetime.combine(monday, dt.time.min, tzinfo=SPRINT_TZ)
             week_end = week_start + dt.timedelta(days=7)
             cycles = Cycle.objects.filter(project_id__in=project_ids, start_date__lt=week_end, end_date__gt=week_start)
+            # Moving a story between sprints rewrites CycleIssue.cycle_id in place, so its created_at is
+            # not when it entered this sprint; the latest "cycles" activity is. Greatest() skips NULLs.
+            moved_at = (
+                IssueActivity.objects.filter(issue_id=OuterRef("pk"), field="cycles", new_identifier__in=cycles.values("id"))
+                .order_by("-created_at")
+                .values("created_at")[:1]
+            )
+            linked_at = (
+                CycleIssue.objects.filter(issue_id=OuterRef("pk"), cycle__in=cycles)
+                .order_by("-created_at")
+                .values("created_at")[:1]
+            )
+            buffer_from = week_start + BUFFER_CUTOFF
             issues = (
                 Issue.issue_objects.filter(
                     issue_cycle__cycle__in=cycles,
@@ -92,19 +123,24 @@ class SprintCapacityEndpoint(BaseAPIView):
                     issue_assignee__deleted_at__isnull=True,
                 )
                 .exclude(type__is_epic=True)
+                .annotate(added_at=Greatest(Subquery(moved_at), Subquery(linked_at)))
                 .select_related("project", "workspace", "state", "estimate_point")
                 .distinct()
                 .order_by("workspace__slug", "project__identifier", "sequence_id")
             )
-            items, planned, done, unestimated = [], 0.0, 0.0, 0
+            items, planned, buffer, done, unestimated = [], 0.0, 0.0, 0.0, 0
             hidden = {"count": 0, "points": 0.0}
             for issue in issues:
                 points = _points(issue)
                 is_done = issue.state.group in ("completed", "cancelled") if issue.state_id else False
+                is_buffer = issue.added_at is not None and issue.added_at >= buffer_from
                 if points is None:
                     unestimated += 1
                 else:
-                    planned += points
+                    if is_buffer:
+                        buffer += points
+                    else:
+                        planned += points
                     if is_done:
                         done += points
                 if not _can_view(issue, viewer, access):
@@ -124,6 +160,7 @@ class SprintCapacityEndpoint(BaseAPIView):
                         "state_name": issue.state.name if issue.state_id else None,
                         "state_group": issue.state.group if issue.state_id else None,
                         "points": points,
+                        "is_buffer": is_buffer,
                     }
                 )
             year, week, _ = monday.isocalendar()
@@ -134,15 +171,19 @@ class SprintCapacityEndpoint(BaseAPIView):
                     "end_date": str(monday + dt.timedelta(days=6)),
                     "is_current": offset == 0,
                     "planned_points": planned,
+                    "buffer_points": buffer,
+                    "buffer_from": buffer_from.isoformat(),
                     "done_points": done,
                     "unestimated": unestimated,
                     "hidden": hidden,
                     "items": items,
                 }
             )
+        capacity = get_capacity(target)
         return Response(
             {
-                "capacity": SPRINT_CAPACITY,
+                "capacity": capacity["planned"],
+                "buffer_capacity": capacity["buffer"],
                 "user": {
                     "id": str(target.id),
                     "display_name": target.display_name,
@@ -153,6 +194,26 @@ class SprintCapacityEndpoint(BaseAPIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+    def patch(self, request):
+        """Set the requesting user's own planned and buffer points per sprint."""
+        current = get_capacity(request.user)
+        values = {}
+        for key in ("planned", "buffer"):
+            raw = request.data.get(key, current[key])
+            if isinstance(raw, bool) or not isinstance(raw, (int, str)) or not str(raw).isdigit():
+                return Response({"error": f"{key} must be a whole number"}, status=status.HTTP_400_BAD_REQUEST)
+            value = int(raw)
+            if value > MAX_POINTS:
+                return Response({"error": f"{key} must be at most {MAX_POINTS}"}, status=status.HTTP_400_BAD_REQUEST)
+            values[key] = value
+        profile, _ = Profile.objects.get_or_create(user=request.user)
+        goals = profile.goals if isinstance(profile.goals, dict) else {}
+        goals["sprint_capacity"] = values
+        profile.goals = goals
+        profile.save(update_fields=["goals"])
+        return Response({"capacity": values["planned"], "buffer_capacity": values["buffer"]}, status=status.HTTP_200_OK)
 
 
 class SprintCapacityPeopleEndpoint(BaseAPIView):
