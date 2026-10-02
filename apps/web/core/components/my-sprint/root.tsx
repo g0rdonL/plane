@@ -122,7 +122,9 @@ function SprintSection({
   isMe: boolean;
 }) {
   const over = sprint.planned_points > capacity;
-  const under = sprint.planned_points < capacity;
+  // Planning stays open until Tuesday 00:00 HKT of the sprint week; after that, additions use the buffer.
+  const planningOpen = Date.now() < new Date(sprint.buffer_from).getTime();
+  const under = sprint.planned_points < capacity && planningOpen;
   const bufferOver = sprint.buffer_points > bufferCapacity;
   const groups = sprint.items.reduce<Record<string, typeof sprint.items>>((acc, item) => {
     const key = `${item.workspace_name} / ${item.project_name}`;
@@ -154,9 +156,9 @@ function SprintSection({
               Over capacity by {formatPoints(sprint.planned_points - capacity)} pts: move a story back to the backlog.
             </li>
           )}
-          {under && !sprint.is_current && (
+          {under && (
             <li className="text-secondary">
-              {formatPoints(capacity - sprint.planned_points)} pts left to plan before Friday 17:00.
+              {formatPoints(capacity - sprint.planned_points)} pts left to plan before Tuesday 00:00.
             </li>
           )}
           {bufferOver && (
