@@ -23,6 +23,17 @@ const service = new SprintCapacityService();
 const fullName = (person: { first_name: string; last_name: string; display_name: string }) =>
   `${person.first_name} ${person.last_name}`.trim() || person.display_name;
 
+// Done first, then the rest in workflow order, so finished work sits at the top of each project.
+const STATE_GROUP_ORDER: Record<string, number> = {
+  completed: 0,
+  cancelled: 1,
+  started: 2,
+  unstarted: 3,
+  backlog: 4,
+  triage: 5,
+};
+const stateRank = (group: string) => STATE_GROUP_ORDER[group] ?? 6;
+
 const formatPoints = (value: number) => (Number.isInteger(value) ? `${value}` : value.toFixed(1));
 const formatRange = (start: string, end: string) => {
   const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
@@ -131,6 +142,8 @@ function SprintSection({
     (acc[key] ||= []).push(item);
     return acc;
   }, {});
+  // Array.prototype.sort is stable, so the API's order is kept within each status.
+  for (const items of Object.values(groups)) items.sort((a, b) => stateRank(a.state_group) - stateRank(b.state_group));
 
   return (
     <section className="space-y-3 rounded-lg border border-subtle bg-layer-1 p-4">
