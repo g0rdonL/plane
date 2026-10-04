@@ -136,6 +136,18 @@ class TestSprintCapacity:
         assert session_client.get(URL, {"user_id": str(teammate.id)}).data["capacity"] == 8  # default
 
     @pytest.mark.django_db
+    def test_offsets_pick_other_weeks(self, session_client):
+        default = session_client.get(URL).data["sprints"]
+        assert [sp["is_current"] for sp in default] == [True, False]
+
+        sprints = session_client.get(URL, {"offsets": "-2,-1,0"}).data["sprints"]
+        assert [sp["is_current"] for sp in sprints] == [False, False, True]
+        starts = [dt.date.fromisoformat(sp["start_date"]) for sp in sprints]
+        assert starts[1] - starts[0] == dt.timedelta(weeks=1) and starts[2] - starts[1] == dt.timedelta(weeks=1)
+
+        for bad in ("x", "0,", "-13", "5", "0,1.5"):
+            assert session_client.get(URL, {"offsets": bad}).status_code == status.HTTP_400_BAD_REQUEST
+
     def test_requires_login(self, api_client):
         assert api_client.get(URL).status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
 
