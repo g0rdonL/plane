@@ -57,6 +57,9 @@ export type TSprintCapacitySprint = {
   /** ISO time from which stories added to this sprint count against the buffer */
   buffer_from: string;
   done_points: number;
+  /** planned_points / buffer_points without done and cancelled stories: what capacity is checked against */
+  remaining_points: number;
+  remaining_buffer_points: number;
   unestimated: number;
   /** stories in projects the viewer cannot see: counted, not described */
   hidden: { count: number; points: number };

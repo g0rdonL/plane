@@ -32,7 +32,8 @@ const STATE_GROUP_ORDER: Record<string, number> = {
   backlog: 4,
   triage: 5,
 };
-const stateRank = (group: string) => STATE_GROUP_ORDER[group] ?? 6;
+const stateRank = (group: string | null) => (group ? (STATE_GROUP_ORDER[group] ?? 6) : 6);
+const isDone = (group: string | null) => group === "completed" || group === "cancelled";
 
 const formatPoints = (value: number) => (Number.isInteger(value) ? `${value}` : value.toFixed(1));
 const formatRange = (start: string, end: string) => {
@@ -132,11 +133,14 @@ function SprintSection({
   bufferCapacity: number;
   isMe: boolean;
 }) {
-  const over = sprint.planned_points > capacity;
+  // Done and cancelled stories are crossed out and leave the sums the capacity is checked against.
+  const planned = sprint.remaining_points ?? sprint.planned_points;
+  const buffer = sprint.remaining_buffer_points ?? sprint.buffer_points;
+  const over = planned > capacity;
   // Planning stays open until Tuesday 00:00 HKT of the sprint week; after that, additions use the buffer.
   const planningOpen = Date.now() < new Date(sprint.buffer_from).getTime();
-  const under = sprint.planned_points < capacity && planningOpen;
-  const bufferOver = sprint.buffer_points > bufferCapacity;
+  const under = planned < capacity && planningOpen;
+  const bufferOver = buffer > bufferCapacity;
   const groups = sprint.items.reduce<Record<string, typeof sprint.items>>((acc, item) => {
     const key = `${item.workspace_name} / ${item.project_name}`;
     (acc[key] ||= []).push(item);
@@ -157,27 +161,26 @@ function SprintSection({
           </p>
         </div>
         <div className="flex items-center gap-1.5">
-          <CapacityBadge used={sprint.planned_points} capacity={capacity} suffix="pts" />
+          <CapacityBadge used={planned} capacity={capacity} suffix="pts" />
           <span className="text-13 text-tertiary">+</span>
-          <CapacityBadge used={sprint.buffer_points} capacity={bufferCapacity} suffix="buffer" />
+          <CapacityBadge used={buffer} capacity={bufferCapacity} suffix="buffer" />
         </div>
       </div>
       {(over || under || bufferOver || sprint.unestimated > 0) && (
         <ul className="space-y-0.5 text-12">
           {over && (
             <li className="text-danger-primary">
-              Over capacity by {formatPoints(sprint.planned_points - capacity)} pts: move a story back to the backlog.
+              Over capacity by {formatPoints(planned - capacity)} pts: move a story back to the backlog.
             </li>
           )}
           {under && (
             <li className="text-secondary">
-              {formatPoints(capacity - sprint.planned_points)} pts left to plan before Tuesday 00:00.
+              {formatPoints(capacity - planned)} pts left to plan before Tuesday 00:00.
             </li>
           )}
           {bufferOver && (
             <li className="text-danger-primary">
-              Buffer used up by {formatPoints(sprint.buffer_points - bufferCapacity)} pts: something planned has to
-              give.
+              Buffer used up by {formatPoints(buffer - bufferCapacity)} pts: something planned has to give.
             </li>
           )}
           {sprint.unestimated > 0 && (
@@ -197,14 +200,12 @@ function SprintSection({
               <Link
                 key={item.id}
                 href={`/${item.workspace_slug}/browse/${item.project_identifier}-${item.sequence_id}/`}
-                className="flex items-center gap-3 rounded-sm px-2 py-1.5 text-13 hover:bg-layer-transparent-hover"
+                className={`flex items-center gap-3 rounded-sm px-2 py-1.5 text-13 hover:bg-layer-transparent-hover ${isDone(item.state_group) ? "line-through opacity-60" : ""}`}
               >
                 <span className="w-24 flex-shrink-0 text-tertiary">
                   {item.project_identifier}-{item.sequence_id}
                 </span>
-                <span
-                  className={`flex-grow truncate ${item.state_group === "completed" || item.state_group === "cancelled" ? "text-tertiary line-through" : "text-primary"}`}
-                >
+                <span className={`flex-grow truncate ${isDone(item.state_group) ? "text-tertiary" : "text-primary"}`}>
                   {item.name}
                 </span>
                 {item.is_buffer && (
