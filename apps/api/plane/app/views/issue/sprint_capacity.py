@@ -32,6 +32,23 @@ MAX_POINTS = 40
 GUEST = 5
 
 
+MIN_OFFSET, MAX_OFFSET = -12, 4
+DEFAULT_OFFSETS = (0, 1)
+
+
+def _parse_offsets(raw):
+    """Week offsets from ?offsets=-1,0,1; the default pair when absent, None when malformed."""
+    if raw is None or raw == "":
+        return DEFAULT_OFFSETS
+    try:
+        offsets = list(dict.fromkeys(int(part) for part in raw.split(",")))
+    except ValueError:
+        return None
+    if any(not MIN_OFFSET <= offset <= MAX_OFFSET for offset in offsets):
+        return None
+    return tuple(offsets)
+
+
 def get_capacity(user):
     goals = Profile.objects.filter(user=user).values_list("goals", flat=True).first() or {}
     saved = goals.get("sprint_capacity") if isinstance(goals, dict) else None
@@ -74,7 +91,10 @@ def _can_view(issue, viewer, access):
 
 
 class SprintCapacityEndpoint(BaseAPIView):
-    """A user's stories in this week's and next week's sprints, across all workspaces.
+    """A user's stories in weekly sprints, across all workspaces: this week's and next week's by default.
+
+    ?offsets=-2,-1,0,1 picks other weeks, as offsets from the current week (past weeks back to
+    MIN_OFFSET, future weeks up to MAX_OFFSET), returned in the order requested.
 
     Defaults to the requesting user. With ?user_id=, shows a teammate who shares at least one workspace
     with the viewer; stories in projects the viewer cannot see are counted but not described.
@@ -88,6 +108,9 @@ class SprintCapacityEndpoint(BaseAPIView):
             target = User.objects.filter(pk=user_id, is_active=True, is_bot=False).first()
             if target is None or not _shared_workspace_ids(viewer, target):
                 return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+        offsets = _parse_offsets(request.query_params.get("offsets"))
+        if offsets is None:
+            return Response({"error": "Invalid offsets"}, status=status.HTTP_400_BAD_REQUEST)
         access = _viewer_access(viewer)
 
         today = timezone.now().astimezone(SPRINT_TZ).date()
@@ -97,7 +120,7 @@ class SprintCapacityEndpoint(BaseAPIView):
         ).values_list("project_id", flat=True)
 
         sprints = []
-        for offset in (0, 1):
+        for offset in offsets:
             monday = this_monday + dt.timedelta(weeks=offset)
             week_start = dt.datetime.combine(monday, dt.time.min, tzinfo=SPRINT_TZ)
             week_end = week_start + dt.timedelta(days=7)
