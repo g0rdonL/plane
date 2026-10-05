@@ -152,6 +152,9 @@ class SprintCapacityEndpoint(BaseAPIView):
                 .order_by("workspace__slug", "project__identifier", "sequence_id")
             )
             items, planned, buffer, done, unestimated = [], 0.0, 0.0, 0.0, 0
+            # Done (and cancelled) stories stay in planned/buffer so past weeks keep their totals, but the
+            # remaining_* sums leave them out: those are what the capacity badges and warnings compare.
+            remaining, remaining_buffer = 0.0, 0.0
             hidden = {"count": 0, "points": 0.0}
             for issue in issues:
                 points = _points(issue)
@@ -162,8 +165,10 @@ class SprintCapacityEndpoint(BaseAPIView):
                 else:
                     if is_buffer:
                         buffer += points
+                        remaining_buffer += 0.0 if is_done else points
                     else:
                         planned += points
+                        remaining += 0.0 if is_done else points
                     if is_done:
                         done += points
                 if not _can_view(issue, viewer, access):
@@ -197,6 +202,8 @@ class SprintCapacityEndpoint(BaseAPIView):
                     "buffer_points": buffer,
                     "buffer_from": buffer_from.isoformat(),
                     "done_points": done,
+                    "remaining_points": remaining,
+                    "remaining_buffer_points": remaining_buffer,
                     "unestimated": unestimated,
                     "hidden": hidden,
                     "items": items,

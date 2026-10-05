@@ -94,6 +94,7 @@ class TestSprintCapacity:
         assert current["is_current"] is True
         assert current["planned_points"] == 6
         assert current["done_points"] == 4
+        assert current["remaining_points"] == 2  # done stories leave the capacity sum
         assert current["unestimated"] == 1
         assert {i["project_identifier"] for i in current["items"]} == {"AAA", "BBB"}
         assert {i["workspace_slug"] for i in current["items"]} == {workspace.slug, "other-ws"}
@@ -119,6 +120,7 @@ class TestSprintCapacity:
         current = session_client.get(URL).data["sprints"][0]
         assert current["planned_points"] == 4
         assert current["buffer_points"] == 3
+        assert current["remaining_buffer_points"] == 3
         assert sorted(i["points"] for i in current["items"] if i["is_buffer"]) == [1, 2]
 
     @pytest.mark.django_db
