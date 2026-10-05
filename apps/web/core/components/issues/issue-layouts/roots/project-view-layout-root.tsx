@@ -12,6 +12,7 @@ import useSWR from "swr";
 import { ISSUE_DISPLAY_FILTERS_BY_PAGE, PROJECT_VIEW_TRACKER_ELEMENTS } from "@plane/constants";
 import { EIssuesStoreType, EIssueLayoutTypes } from "@plane/types";
 // hooks
+import { PointsSummary } from "@/components/cycles/sprint-points-summary";
 import { ProjectLevelWorkItemFiltersHOC } from "@/components/work-item-filters/filters-hoc/project-level";
 import { WorkItemFiltersRow } from "@/components/work-item-filters/filters-row";
 import { useIssues } from "@/hooks/store/use-issues";
@@ -49,7 +50,7 @@ export const ProjectViewLayoutRoot = observer(function ProjectViewLayoutRoot() {
   const projectId = routerProjectId ? routerProjectId?.toString() : undefined;
   const viewId = routerViewId ? routerViewId?.toString() : undefined;
   // hooks
-  const { issuesFilter } = useIssues(EIssuesStoreType.PROJECT_VIEW);
+  const { issues, issuesFilter } = useIssues(EIssuesStoreType.PROJECT_VIEW);
   const { getViewById } = useProjectView();
   // derived values
   const projectView = viewId ? getViewById(viewId) : undefined;
@@ -91,6 +92,7 @@ export const ProjectViewLayoutRoot = observer(function ProjectViewLayoutRoot() {
           label: "Save as",
         }}
         enableUpdateView
+        showOnMount
         entityId={viewId}
         entityType={EIssuesStoreType.PROJECT_VIEW}
         filtersToShowByLayout={ISSUE_DISPLAY_FILTERS_BY_PAGE.issues.filters}
@@ -104,6 +106,7 @@ export const ProjectViewLayoutRoot = observer(function ProjectViewLayoutRoot() {
             {projectViewWorkItemsFilter && (
               <WorkItemFiltersRow
                 filter={projectViewWorkItemsFilter}
+                trailingContent={<PointsSummary values={issues?.pointsSummary[viewId]} />}
                 trackerElements={{
                   saveView: PROJECT_VIEW_TRACKER_ELEMENTS.HEADER_SAVE_VIEW_BUTTON,
                 }}

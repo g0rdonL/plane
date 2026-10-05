@@ -4,7 +4,8 @@
  * See the LICENSE file for details.
  */
 
-import { action, makeObservable, runInAction } from "mobx";
+import { action, makeObservable, observable, runInAction } from "mobx";
+import { set } from "lodash-es";
 // base class
 import type {
   TIssue,
@@ -13,6 +14,7 @@ import type {
   IssuePaginationOptions,
   TIssuesResponse,
   TBulkOperationsPayload,
+  TViewPointsSummary,
 } from "@plane/types";
 // services
 // types
@@ -23,6 +25,7 @@ import type { IProjectViewIssuesFilter } from "./filter.store";
 
 export interface IProjectViewIssues extends IBaseIssuesStore {
   viewFlags: ViewFlags;
+  pointsSummary: Record<string, TViewPointsSummary | undefined>;
   // actions
   fetchIssues: (
     workspaceSlug: string,
@@ -52,6 +55,8 @@ export interface IProjectViewIssues extends IBaseIssuesStore {
   removeBulkIssues: (workspaceSlug: string, projectId: string, issueIds: string[]) => Promise<void>;
   archiveBulkIssues: (workspaceSlug: string, projectId: string, issueIds: string[]) => Promise<void>;
   bulkUpdateProperties: (workspaceSlug: string, projectId: string, data: TBulkOperationsPayload) => Promise<void>;
+
+  fetchPointsSummary: (workspaceSlug: string, projectId: string, viewId: string) => Promise<void>;
 }
 
 export class ProjectViewIssues extends BaseIssuesStore implements IProjectViewIssues {
@@ -60,6 +65,9 @@ export class ProjectViewIssues extends BaseIssuesStore implements IProjectViewIs
     enableIssueCreation: true,
     enableInlineEditing: true,
   };
+  // aight fork: story point sums per view, keyed by viewId
+  pointsSummary: Record<string, TViewPointsSummary | undefined> = {};
+  private pointsSummaryView: { projectId: string; viewId: string } | undefined = undefined;
   //filter store
   issueFilterStore: IProjectViewIssuesFilter;
 
@@ -70,12 +78,47 @@ export class ProjectViewIssues extends BaseIssuesStore implements IProjectViewIs
       fetchIssues: action,
       fetchNextIssues: action,
       fetchIssuesWithExistingPagination: action,
+      pointsSummary: observable,
+      fetchPointsSummary: action,
     });
     //filter store
     this.issueFilterStore = issueFilterStore;
   }
 
-  fetchParentStats = async () => {};
+  // aight fork: refresh the point sums after the list loads or a work item is created, updated or removed
+  fetchParentStats = async (workspaceSlug: string) => {
+    if (this.pointsSummaryView) {
+      const { projectId, viewId } = this.pointsSummaryView;
+      void this.fetchPointsSummary(workspaceSlug, projectId, viewId);
+    }
+  };
+
+  /**
+   * aight fork: fetches story point sums for every work item matching the view's filters (not just loaded pages)
+   */
+  fetchPointsSummary = async (workspaceSlug: string, projectId: string, viewId: string) => {
+    const params: Record<string, unknown> = {
+      ...this.issueFilterStore?.getFilterParams(
+        this.paginationOptions ?? ({} as IssuePaginationOptions),
+        viewId,
+        undefined,
+        undefined,
+        undefined
+      ),
+    };
+    delete params.cursor;
+    delete params.per_page;
+    // count sub-work items too: stories under epics carry the points, even when the list hides them
+    params.sub_issue = true;
+    try {
+      const summary = await this.issueService.getIssuesPointsSummary(workspaceSlug, projectId, params);
+      runInAction(() => {
+        set(this.pointsSummary, [viewId], summary);
+      });
+    } catch (_e) {
+      console.warn("could not fetch story point summary");
+    }
+  };
 
   /** */
   updateParentStats = () => {};
@@ -102,6 +145,8 @@ export class ProjectViewIssues extends BaseIssuesStore implements IProjectViewIs
         this.setLoader(loadType);
         this.clear(!isExistingPaginationOptions); // clear while fetching from server.
       });
+      // aight fork: the point sums follow the view whose list is loaded
+      this.pointsSummaryView = { projectId, viewId };
 
       // get params from pagination options
       const params = this.issueFilterStore?.getFilterParams(options, viewId, undefined, undefined, undefined);

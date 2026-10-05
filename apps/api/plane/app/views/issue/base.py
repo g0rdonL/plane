@@ -72,6 +72,7 @@ from plane.utils.epic import epic_request_q, get_epic_type, is_epic_request
 from plane.utils.host import base_host
 from plane.utils.issue_filters import issue_filters
 from plane.utils.order_queryset import order_issue_queryset
+from plane.utils.points_summary import points_summary
 from plane.utils.paginator import GroupedOffsetPaginator, SubGroupedOffsetPaginator
 from plane.utils.timezone_converter import user_timezone_converter
 
@@ -261,6 +262,29 @@ class IssueViewSet(BaseViewSet):
         )
 
         return issues
+
+    @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST])
+    def points_summary(self, request, slug, project_id):
+        """Story point sums for the project work items matching the list's filters (aight fork).
+
+        Applies the same filters as list(), including the guest restriction.
+        """
+        project = Project.objects.get(pk=project_id, workspace__slug=slug)
+        issue_queryset = self.get_queryset().filter(epic_request_q(request))
+        issue_queryset = self.filter_queryset(issue_queryset)
+        issue_queryset = issue_queryset.filter(**issue_filters(request.query_params, "GET"))
+        if (
+            ProjectMember.objects.filter(
+                workspace__slug=slug,
+                project_id=project_id,
+                member=request.user,
+                role=5,
+                is_active=True,
+            ).exists()
+            and not project.guest_view_all_features
+        ):
+            issue_queryset = issue_queryset.filter(created_by=request.user)
+        return Response(points_summary(issue_queryset), status=status.HTTP_200_OK)
 
     @method_decorator(gzip_page)
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER, ROLE.GUEST])

@@ -12,6 +12,7 @@ import { ISSUE_DISPLAY_FILTERS_BY_PAGE, PROJECT_VIEW_TRACKER_ELEMENTS } from "@p
 import { EIssueLayoutTypes, EIssuesStoreType } from "@plane/types";
 import { Spinner } from "@plane/ui";
 // components
+import { PointsSummary } from "@/components/cycles/sprint-points-summary";
 import { ProjectLevelWorkItemFiltersHOC } from "@/components/work-item-filters/filters-hoc/project-level";
 import { WorkItemFiltersRow } from "@/components/work-item-filters/filters-row";
 // hooks
@@ -68,6 +69,7 @@ export const ProjectLayoutRoot = observer(function ProjectLayoutRoot() {
     <IssuesStoreContext.Provider value={EIssuesStoreType.PROJECT}>
       <ProjectLevelWorkItemFiltersHOC
         enableSaveView
+        showOnMount
         entityType={EIssuesStoreType.PROJECT}
         entityId={projectId}
         filtersToShowByLayout={ISSUE_DISPLAY_FILTERS_BY_PAGE.issues.filters}
@@ -81,6 +83,7 @@ export const ProjectLayoutRoot = observer(function ProjectLayoutRoot() {
             {projectWorkItemsFilter && (
               <WorkItemFiltersRow
                 filter={projectWorkItemsFilter}
+                trailingContent={<PointsSummary values={issues?.pointsSummary[projectId]} />}
                 trackerElements={{
                   saveView: PROJECT_VIEW_TRACKER_ELEMENTS.PROJECT_HEADER_SAVE_AS_VIEW_BUTTON,
                 }}

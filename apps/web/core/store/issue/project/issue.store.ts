@@ -4,7 +4,8 @@
  * See the LICENSE file for details.
  */
 
-import { action, makeObservable, runInAction } from "mobx";
+import { action, makeObservable, observable, runInAction } from "mobx";
+import { set } from "lodash-es";
 // types
 import type {
   TIssue,
@@ -14,6 +15,7 @@ import type {
   TIssuesResponse,
   TBulkOperationsPayload,
   TIssueServiceType,
+  TViewPointsSummary,
 } from "@plane/types";
 import { EIssueServiceType } from "@plane/types";
 // helpers
@@ -26,6 +28,7 @@ import type { IProjectIssuesFilter } from "./filter.store";
 
 export interface IProjectIssues extends IBaseIssuesStore {
   viewFlags: ViewFlags;
+  pointsSummary: Record<string, TViewPointsSummary | undefined>;
   // action
   fetchIssues: (
     workspaceSlug: string,
@@ -52,6 +55,8 @@ export interface IProjectIssues extends IBaseIssuesStore {
   removeBulkIssues: (workspaceSlug: string, projectId: string, issueIds: string[]) => Promise<void>;
   archiveBulkIssues: (workspaceSlug: string, projectId: string, issueIds: string[]) => Promise<void>;
   bulkUpdateProperties: (workspaceSlug: string, projectId: string, data: TBulkOperationsPayload) => Promise<void>;
+
+  fetchPointsSummary: (workspaceSlug: string, projectId: string) => Promise<void>;
 }
 
 export class ProjectIssues extends BaseIssuesStore implements IProjectIssues {
@@ -61,6 +66,9 @@ export class ProjectIssues extends BaseIssuesStore implements IProjectIssues {
     enableInlineEditing: true,
   };
   router;
+  // aight fork: story point sums per project, keyed by projectId
+  pointsSummary: Record<string, TViewPointsSummary | undefined> = {};
+  private pointsSummaryProjectId: string | undefined = undefined;
 
   // filter store
   issueFilterStore: IProjectIssuesFilter;
@@ -77,6 +85,8 @@ export class ProjectIssues extends BaseIssuesStore implements IProjectIssues {
       fetchIssuesWithExistingPagination: action,
 
       quickAddIssue: action,
+      pointsSummary: observable,
+      fetchPointsSummary: action,
     });
     // filter store
     this.issueFilterStore = issueFilterStore;
@@ -90,6 +100,35 @@ export class ProjectIssues extends BaseIssuesStore implements IProjectIssues {
    */
   fetchParentStats = async (workspaceSlug: string, projectId?: string) => {
     if (projectId) void this.rootIssueStore.rootStore.projectRoot.project.fetchProjectDetails(workspaceSlug, projectId);
+    // aight fork: refresh the point sums after the list loads or a work item is created, updated or removed
+    if (projectId && projectId === this.pointsSummaryProjectId) void this.fetchPointsSummary(workspaceSlug, projectId);
+  };
+
+  /**
+   * aight fork: fetches story point sums for every work item matching the list's filters (not just loaded pages)
+   */
+  fetchPointsSummary = async (workspaceSlug: string, projectId: string) => {
+    const params: Record<string, unknown> = {
+      ...this.issueFilterStore?.getFilterParams(
+        this.paginationOptions ?? ({} as IssuePaginationOptions),
+        projectId,
+        undefined,
+        undefined,
+        undefined
+      ),
+    };
+    delete params.cursor;
+    delete params.per_page;
+    // count sub-work items too: stories under epics carry the points, even when the list hides them
+    params.sub_issue = true;
+    try {
+      const summary = await this.issueService.getIssuesPointsSummary(workspaceSlug, projectId, params);
+      runInAction(() => {
+        set(this.pointsSummary, [projectId], summary);
+      });
+    } catch (_e) {
+      console.warn("could not fetch story point summary");
+    }
   };
 
   /** */
@@ -116,6 +155,8 @@ export class ProjectIssues extends BaseIssuesStore implements IProjectIssues {
         this.setLoader(loadType);
         this.clear(!isExistingPaginationOptions); // clear while fetching from server.
       });
+      // aight fork: the point sums follow the project whose list is loaded
+      this.pointsSummaryProjectId = projectId;
 
       // get params from pagination options
       const params = this.issueFilterStore?.getFilterParams(options, projectId, undefined, undefined, undefined);

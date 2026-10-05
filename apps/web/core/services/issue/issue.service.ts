@@ -18,6 +18,7 @@ import type {
   TIssueServiceType,
   TIssuesResponse,
   TIssueSubIssues,
+  TViewPointsSummary,
 } from "@plane/types";
 // services
 import { APIService } from "@/services/api.service";
@@ -85,6 +86,19 @@ export class IssueService extends APIService {
     config = {}
   ): Promise<TIssuesResponse> {
     return this.getIssuesFromServer(workspaceSlug, projectId, queries, config);
+  }
+
+  // aight fork: story point sums for the project work items matching the list's filters
+  async getIssuesPointsSummary(
+    workspaceSlug: string,
+    projectId: string,
+    params: Record<string, unknown>
+  ): Promise<TViewPointsSummary> {
+    return this.get(`/api/workspaces/${workspaceSlug}/projects/${projectId}/issues/points-summary/`, { params })
+      .then((response) => response?.data)
+      .catch((error) => {
+        throw error?.response?.data;
+      });
   }
 
   async getDeletedIssues(workspaceSlug: string, projectId: string, queries?: any): Promise<TIssuesResponse> {
