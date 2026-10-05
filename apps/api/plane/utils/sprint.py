@@ -2,14 +2,14 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # See the LICENSE file for details.
 
-# Aight fork: sprints are weekly, Monday 00:00 to Sunday 23:59 Hong Kong time.
+# Aight fork: sprints are weekly, Monday 00:00 to Sunday 23:59 Bangkok time.
 import datetime as dt
 import zoneinfo
 
 from django.db.models import Q
 from django.utils import timezone
 
-SPRINT_TZ = zoneinfo.ZoneInfo("Asia/Hong_Kong")
+SPRINT_TZ = zoneinfo.ZoneInfo("Asia/Bangkok")
 SPRINT_OFFSETS = {"current": 0, "next": 1}
 
 
