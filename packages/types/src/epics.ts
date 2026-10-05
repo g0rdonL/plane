@@ -43,7 +43,7 @@ export type TSprintCapacityItem = {
   state_name: string | null;
   state_group: string | null;
   points: number | null;
-  /** entered the sprint on or after Tuesday 00:00 HKT, so it uses the buffer */
+  /** entered the sprint on or after Tuesday 00:00 Bangkok time, so it uses the buffer */
   is_buffer: boolean;
 };
 

@@ -137,7 +137,7 @@ function SprintSection({
   const planned = sprint.remaining_points ?? sprint.planned_points;
   const buffer = sprint.remaining_buffer_points ?? sprint.buffer_points;
   const over = planned > capacity;
-  // Planning stays open until Tuesday 00:00 HKT of the sprint week; after that, additions use the buffer.
+  // Planning stays open until Tuesday 00:00 Bangkok time of the sprint week; after that, additions use the buffer.
   const planningOpen = Date.now() < new Date(sprint.buffer_from).getTime();
   const under = planned < capacity && planningOpen;
   const bufferOver = buffer > bufferCapacity;
