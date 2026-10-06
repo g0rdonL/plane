@@ -13,13 +13,7 @@ from django.db.models import (
     Q,
     Subquery,
     Prefetch,
-    Case,
-    When,
-    Value,
-    Sum,
-    FloatField,
 )
-from django.db.models.functions import Cast
 from django.utils.decorators import method_decorator
 from django.views.decorators.gzip import gzip_page
 from django.db import transaction
@@ -47,6 +41,7 @@ from plane.db.models import (
     ModuleIssue,
 )
 from plane.utils.issue_filters import issue_filters
+from plane.utils.points_summary import points_summary
 from plane.utils.order_queryset import VIEW_ORDER_BY_ALLOWLIST, order_issue_queryset, sanitize_order_by
 from plane.bgtasks.recent_visited_task import recent_visited_task
 from .. import BaseViewSet
@@ -276,24 +271,7 @@ class WorkspaceViewIssuesViewSet(BaseViewSet):
         issue_queryset = issue_queryset.filter(**issue_filters(request.query_params, "GET"))
         issue_queryset = issue_queryset.filter(self._get_project_permission_filters())
 
-        def group_sum(group):
-            return Sum(
-                Case(When(state__group=group, then="points"), default=Value(0.0), output_field=FloatField())
-            )
-
-        totals = (
-            Issue.issue_objects.filter(
-                id__in=issue_queryset.values("id"),
-                estimate_point__estimate__type="points",
-            )
-            .annotate(points=Cast("estimate_point__value", FloatField()))
-            .aggregate(
-                unstarted_estimate_points=group_sum("unstarted"),
-                started_estimate_points=group_sum("started"),
-                completed_estimate_points=group_sum("completed"),
-            )
-        )
-        return Response({k: v or 0 for k, v in totals.items()}, status=status.HTTP_200_OK)
+        return Response(points_summary(issue_queryset), status=status.HTTP_200_OK)
 
 class IssueViewViewSet(BaseViewSet):
     serializer_class = IssueViewSerializer

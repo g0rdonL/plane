@@ -45,6 +45,11 @@ urlpatterns = [
         name="project-issue",
     ),
     path(
+        "workspaces/<str:slug>/projects/<uuid:project_id>/issues/points-summary/",
+        IssueViewSet.as_view({"get": "points_summary"}),
+        name="project-issue-points-summary",
+    ),
+    path(
         "workspaces/<str:slug>/projects/<uuid:project_id>/issues-detail/",
         IssueDetailEndpoint.as_view(),
         name="project-issue-detail",
