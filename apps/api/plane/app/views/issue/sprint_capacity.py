@@ -19,12 +19,12 @@ from rest_framework.response import Response
 from .. import BaseAPIView
 from plane.db.models import Cycle, CycleIssue, Issue, IssueActivity, Profile, ProjectMember, User, WorkspaceMember
 
-# Aight fork: sprints are weekly, Monday 00:00 to Sunday 23:59 Hong Kong time. By default each IC plans
+# Aight fork: sprints are weekly, Monday 00:00 to Sunday 23:59 Bangkok time. By default each IC plans
 # 8 points per sprint across every workspace and project, plus a 2-point buffer for unplanned work
 # (Plane User Convention). Part-timers set their own numbers, stored in Profile.goals["sprint_capacity"]
 # (an unused CE field, so no migration). A story counts against the buffer when it entered the sprint
 # on or after Tuesday 00:00 of that sprint week.
-SPRINT_TZ = zoneinfo.ZoneInfo("Asia/Hong_Kong")
+SPRINT_TZ = zoneinfo.ZoneInfo("Asia/Bangkok")
 SPRINT_CAPACITY = 8
 SPRINT_BUFFER = 2
 BUFFER_CUTOFF = dt.timedelta(days=1)
