@@ -79,7 +79,8 @@ class TestSprintCapacity:
         epic_type = IssueType.objects.create(workspace=workspace, name="Epic", is_epic=True)
 
         make_story(p1, create_user, s1["todo"], c1[0], pts1["2"], assignee=create_user)
-        make_story(p2, create_user, s2["done"], c2[0], pts2["4"], assignee=create_user)
+        done = make_story(p2, create_user, s2["done"], c2[0], pts2["4"], assignee=create_user)
+        Issue.objects.filter(pk=done.pk).update(completed_at=c2[0].start_date)  # finished Monday
         make_story(p2, create_user, s2["todo"], c2[0], None, assignee=create_user)  # unestimated
         make_story(p1, create_user, s1["todo"], c1[0], pts1["6"], assignee=someone)  # someone else's
         make_story(p1, create_user, s1["todo"], c1[0], pts1["6"], assignee=create_user, epic_type=epic_type)  # epic
@@ -94,7 +95,7 @@ class TestSprintCapacity:
         assert current["is_current"] is True
         assert current["planned_points"] == 6
         assert current["done_points"] == 4
-        assert current["remaining_points"] == 2  # done stories leave the capacity sum
+        assert current["remaining_points"] == 2  # done while planning was open: leaves the capacity sum
         assert current["unestimated"] == 1
         assert {i["project_identifier"] for i in current["items"]} == {"AAA", "BBB"}
         assert {i["workspace_slug"] for i in current["items"]} == {workspace.slug, "other-ws"}
@@ -122,6 +123,21 @@ class TestSprintCapacity:
         assert current["buffer_points"] == 3
         assert current["remaining_buffer_points"] == 3
         assert sorted(i["points"] for i in current["items"] if i["is_buffer"]) == [1, 2]
+
+    @pytest.mark.django_db
+    def test_stories_done_mid_sprint_keep_counting(self, session_client, workspace, create_user):
+        p1, s1, pts1, c1 = make_project(workspace, create_user, "AAA")
+        tuesday = c1[0].start_date + dt.timedelta(days=1)
+        monday_done = make_story(p1, create_user, s1["done"], c1[0], pts1["1"], assignee=create_user)
+        tuesday_done = make_story(p1, create_user, s1["done"], c1[0], pts1["2"], assignee=create_user)
+        buffer_done = make_story(p1, create_user, s1["done"], c1[0], pts1["4"], assignee=create_user, added_at=tuesday)
+        Issue.objects.filter(pk=monday_done.pk).update(completed_at=c1[0].start_date + dt.timedelta(hours=20))
+        Issue.objects.filter(pk__in=[tuesday_done.pk, buffer_done.pk]).update(completed_at=tuesday + dt.timedelta(hours=1))
+
+        current = session_client.get(URL).data["sprints"][0]
+        assert (current["planned_points"], current["buffer_points"], current["done_points"]) == (3, 4, 7)
+        assert current["remaining_points"] == 2  # only the story finished on Monday leaves
+        assert current["remaining_buffer_points"] == 4
 
     @pytest.mark.django_db
     def test_people_set_their_own_capacity(self, session_client, workspace, create_user):

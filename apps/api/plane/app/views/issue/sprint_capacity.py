@@ -152,23 +152,30 @@ class SprintCapacityEndpoint(BaseAPIView):
                 .order_by("workspace__slug", "project__identifier", "sequence_id")
             )
             items, planned, buffer, done, unestimated = [], 0.0, 0.0, 0.0, 0
-            # Done (and cancelled) stories stay in planned/buffer so past weeks keep their totals, but the
-            # remaining_* sums leave them out: those are what the capacity badges and warnings compare.
+            # Done (and cancelled) stories stay in planned/buffer so past weeks keep their totals. The
+            # remaining_* sums, which the capacity badges and warnings compare, leave out stories finished
+            # while planning was still open (before buffer_from), since that frees room to plan more.
+            # Stories finished once the sprint is under way keep counting: the week was planned around them.
+            # Cancelled stories have no timestamp and always leave.
             remaining, remaining_buffer = 0.0, 0.0
             hidden = {"count": 0, "points": 0.0}
             for issue in issues:
                 points = _points(issue)
                 is_done = issue.state.group in ("completed", "cancelled") if issue.state_id else False
                 is_buffer = issue.added_at is not None and issue.added_at >= buffer_from
+                finished_mid_sprint = (
+                    is_done and issue.state.group == "completed" and (issue.completed_at or week_start) >= buffer_from
+                )
+                counts = not is_done or finished_mid_sprint
                 if points is None:
                     unestimated += 1
                 else:
                     if is_buffer:
                         buffer += points
-                        remaining_buffer += 0.0 if is_done else points
+                        remaining_buffer += points if counts else 0.0
                     else:
                         planned += points
-                        remaining += 0.0 if is_done else points
+                        remaining += points if counts else 0.0
                     if is_done:
                         done += points
                 if not _can_view(issue, viewer, access):
