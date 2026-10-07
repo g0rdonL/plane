@@ -10,11 +10,13 @@ import { usePathname, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 // plane imports
 import { Button } from "@plane/propel/button";
+import { BoardLayoutIcon, ListLayoutIcon, StateGroupIcon } from "@plane/propel/icons";
 import { TOAST_TYPE, setToast } from "@plane/propel/toast";
-import type { TSprintCapacity, TSprintCapacitySprint } from "@plane/types";
+import type { TSprintCapacity, TSprintCapacityItem, TSprintCapacitySprint, TStateGroups } from "@plane/types";
 import { CustomSearchSelect, Input, Loader } from "@plane/ui";
 // hooks
 import { useAppRouter } from "@/hooks/use-app-router";
+import useLocalStorage from "@/hooks/use-local-storage";
 // services
 import { SprintCapacityService } from "@/services/sprint-capacity.service";
 
@@ -34,6 +36,23 @@ const STATE_GROUP_ORDER: Record<string, number> = {
 };
 const stateRank = (group: string | null) => (group ? (STATE_GROUP_ORDER[group] ?? 6) : 6);
 const isDone = (group: string | null) => group === "completed" || group === "cancelled";
+
+type TLayout = "list" | "board";
+
+// Board columns run left to right in workflow order; triage and stateless stories only get a column when present.
+const BOARD_COLUMNS: { group: TStateGroups | "triage" | null; label: string; always: boolean }[] = [
+  { group: "triage", label: "Triage", always: false },
+  { group: "backlog", label: "Backlog", always: true },
+  { group: "unstarted", label: "Todo", always: true },
+  { group: "started", label: "In progress", always: true },
+  { group: "completed", label: "Done", always: true },
+  { group: "cancelled", label: "Cancelled", always: true },
+  { group: null, label: "No state", always: false },
+];
+const columnOf = (group: string | null) => (BOARD_COLUMNS.some((column) => column.group === group) ? group : null);
+
+const itemHref = (item: TSprintCapacityItem) =>
+  `/${item.workspace_slug}/browse/${item.project_identifier}-${item.sequence_id}/`;
 
 const formatPoints = (value: number) => (Number.isInteger(value) ? `${value}` : value.toFixed(1));
 const formatRange = (start: string, end: string) => {
@@ -122,16 +141,123 @@ function CapacitySettings({ data, onSaved }: { data: TSprintCapacity; onSaved: (
   );
 }
 
+function BufferTag() {
+  return (
+    <span
+      className="flex-shrink-0 rounded-sm bg-warning-subtle px-1.5 text-11 text-warning-primary"
+      title="Added on or after Tuesday 00:00, so it uses the buffer"
+    >
+      buffer
+    </span>
+  );
+}
+
+function SprintList({ items }: { items: TSprintCapacityItem[] }) {
+  const groups = items.reduce<Record<string, TSprintCapacityItem[]>>((acc, item) => {
+    const key = `${item.workspace_name} / ${item.project_name}`;
+    (acc[key] ||= []).push(item);
+    return acc;
+  }, {});
+  // Array.prototype.sort is stable, so the API's order is kept within each status.
+  for (const group of Object.values(groups)) group.sort((a, b) => stateRank(a.state_group) - stateRank(b.state_group));
+
+  return (
+    <>
+      {Object.entries(groups).map(([group, groupItems]) => (
+        <div key={group} className="space-y-1">
+          <p className="text-11 font-medium tracking-wide text-tertiary uppercase">{group}</p>
+          {groupItems.map((item) => (
+            <Link
+              key={item.id}
+              href={itemHref(item)}
+              className={`flex items-center gap-3 rounded-sm px-2 py-1.5 text-13 hover:bg-layer-transparent-hover ${isDone(item.state_group) ? "line-through opacity-60" : ""}`}
+            >
+              <span className="w-24 flex-shrink-0 text-tertiary">
+                {item.project_identifier}-{item.sequence_id}
+              </span>
+              <span className={`flex-grow truncate ${isDone(item.state_group) ? "text-tertiary" : "text-primary"}`}>
+                {item.name}
+              </span>
+              {item.is_buffer && <BufferTag />}
+              <span className="w-24 flex-shrink-0 text-right text-12 text-secondary">{item.state_name}</span>
+              <span className="w-12 flex-shrink-0 text-right text-12 font-medium text-primary">
+                {item.points === null ? "–" : `${formatPoints(item.points)} pts`}
+              </span>
+            </Link>
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
+// Read-only board: stories span workspaces with their own states, so columns are state groups and there is no drag.
+function SprintBoard({ items }: { items: TSprintCapacityItem[] }) {
+  const columns = BOARD_COLUMNS.map((column) => ({
+    column,
+    items: items.filter((item) => columnOf(item.state_group) === column.group),
+  })).filter(({ column, items: columnItems }) => column.always || columnItems.length > 0);
+
+  return (
+    <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-2">
+      {columns.map(({ column, items: columnItems }) => {
+        const points = columnItems.reduce((sum, item) => sum + (item.points ?? 0), 0);
+        return (
+          <div key={column.label} className="flex w-72 flex-shrink-0 flex-col gap-2 rounded-lg bg-layer-2 p-2">
+            <div className="flex items-center gap-2 px-1 text-13 font-medium text-primary">
+              {column.group && column.group !== "triage" && (
+                <StateGroupIcon stateGroup={column.group} className="size-3.5 flex-shrink-0" />
+              )}
+              <span className="flex-grow truncate">{column.label}</span>
+              <span className="font-normal text-12 text-tertiary">
+                {columnItems.length} · {formatPoints(points)} pts
+              </span>
+            </div>
+            {columnItems.map((item) => (
+              <Link
+                key={item.id}
+                href={itemHref(item)}
+                className={`flex flex-col gap-1.5 rounded-md border border-subtle bg-layer-1 px-3 py-2 text-13 hover:border-strong ${isDone(item.state_group) ? "line-through opacity-60" : ""}`}
+              >
+                <div className="flex items-center gap-2 text-12 text-tertiary">
+                  <span className="flex-shrink-0">
+                    {item.project_identifier}-{item.sequence_id}
+                  </span>
+                  <span className="flex-grow truncate" title={`${item.workspace_name} / ${item.project_name}`}>
+                    {item.project_name}
+                  </span>
+                </div>
+                <span className={`line-clamp-3 ${isDone(item.state_group) ? "text-tertiary" : "text-primary"}`}>
+                  {item.name}
+                </span>
+                <div className="flex items-center gap-2 text-12">
+                  <span className="flex-grow truncate text-secondary">{item.state_name}</span>
+                  {item.is_buffer && <BufferTag />}
+                  <span className="flex-shrink-0 font-medium text-primary">
+                    {item.points === null ? "–" : `${formatPoints(item.points)} pts`}
+                  </span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function SprintSection({
   sprint,
   capacity,
   bufferCapacity,
   isMe,
+  layout,
 }: {
   sprint: TSprintCapacitySprint;
   capacity: number;
   bufferCapacity: number;
   isMe: boolean;
+  layout: TLayout;
 }) {
   // Done and cancelled stories are crossed out and leave the sums the capacity is checked against.
   const planned = sprint.remaining_points ?? sprint.planned_points;
@@ -141,14 +267,6 @@ function SprintSection({
   const planningOpen = Date.now() < new Date(sprint.buffer_from).getTime();
   const under = planned < capacity && planningOpen;
   const bufferOver = buffer > bufferCapacity;
-  const groups = sprint.items.reduce<Record<string, typeof sprint.items>>((acc, item) => {
-    const key = `${item.workspace_name} / ${item.project_name}`;
-    (acc[key] ||= []).push(item);
-    return acc;
-  }, {});
-  // Array.prototype.sort is stable, so the API's order is kept within each status.
-  for (const items of Object.values(groups)) items.sort((a, b) => stateRank(a.state_group) - stateRank(b.state_group));
-
   return (
     <section className="space-y-3 rounded-lg border border-subtle bg-layer-1 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -192,38 +310,10 @@ function SprintSection({
       )}
       {sprint.items.length === 0 && sprint.hidden.count === 0 ? (
         <p className="text-13 text-tertiary">Nothing assigned{isMe ? " to you" : ""} in this sprint yet.</p>
-      ) : sprint.items.length === 0 ? null : (
-        Object.entries(groups).map(([group, items]) => (
-          <div key={group} className="space-y-1">
-            <p className="text-11 font-medium tracking-wide text-tertiary uppercase">{group}</p>
-            {items.map((item) => (
-              <Link
-                key={item.id}
-                href={`/${item.workspace_slug}/browse/${item.project_identifier}-${item.sequence_id}/`}
-                className={`flex items-center gap-3 rounded-sm px-2 py-1.5 text-13 hover:bg-layer-transparent-hover ${isDone(item.state_group) ? "line-through opacity-60" : ""}`}
-              >
-                <span className="w-24 flex-shrink-0 text-tertiary">
-                  {item.project_identifier}-{item.sequence_id}
-                </span>
-                <span className={`flex-grow truncate ${isDone(item.state_group) ? "text-tertiary" : "text-primary"}`}>
-                  {item.name}
-                </span>
-                {item.is_buffer && (
-                  <span
-                    className="flex-shrink-0 rounded-sm bg-warning-subtle px-1.5 text-11 text-warning-primary"
-                    title="Added on or after Tuesday 00:00, so it uses the buffer"
-                  >
-                    buffer
-                  </span>
-                )}
-                <span className="w-24 flex-shrink-0 text-right text-12 text-secondary">{item.state_name}</span>
-                <span className="w-12 flex-shrink-0 text-right text-12 font-medium text-primary">
-                  {item.points === null ? "–" : `${formatPoints(item.points)} pts`}
-                </span>
-              </Link>
-            ))}
-          </div>
-        ))
+      ) : sprint.items.length === 0 ? null : layout === "board" ? (
+        <SprintBoard items={sprint.items} />
+      ) : (
+        <SprintList items={sprint.items} />
       )}
       {sprint.hidden.count > 0 && (
         <p className="rounded-sm bg-layer-2 px-2 py-1.5 text-12 text-secondary">
@@ -235,11 +325,37 @@ function SprintSection({
   );
 }
 
+function LayoutToggle({ layout, onChange }: { layout: TLayout; onChange: (layout: TLayout) => void }) {
+  const options = [
+    { key: "list" as const, title: "List", Icon: ListLayoutIcon },
+    { key: "board" as const, title: "Board", Icon: BoardLayoutIcon },
+  ];
+  return (
+    <div className="flex items-center gap-0.5 rounded-md bg-layer-2 p-0.5">
+      {options.map(({ key, title, Icon }) => (
+        <button
+          key={key}
+          type="button"
+          title={title}
+          aria-label={`${title} layout`}
+          aria-pressed={layout === key}
+          onClick={() => onChange(key)}
+          className={`grid size-7 place-items-center rounded-sm ${layout === key ? "bg-layer-1 text-primary shadow-raised-100" : "text-tertiary hover:text-secondary"}`}
+        >
+          <Icon className="size-3.5" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function MySprintRoot() {
   const router = useAppRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const userId = searchParams.get("user") ?? undefined;
+  const { storedValue, setValue: setLayout } = useLocalStorage<TLayout>("my_sprint_layout", "list");
+  const layout = storedValue ?? "list";
 
   const { data: people } = useSWR("MY_SPRINT_PEOPLE", () => service.getPeople(), { revalidateOnFocus: false });
   const { data, error, mutate } = useSWR(
@@ -263,24 +379,27 @@ export function MySprintRoot() {
 
   return (
     <div className="h-full w-full overflow-y-auto">
-      <div className="mx-auto max-w-4xl space-y-4 p-6">
+      <div className={`mx-auto space-y-4 p-6 ${layout === "board" ? "max-w-full" : "max-w-4xl"}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="max-w-xl text-13 text-secondary">
             {data?.user.is_me === false
               ? `${data.user.full_name}'s stories in this week's and next week's sprints, across all workspaces. Stories in projects you can't access are counted but not shown.`
               : `Everything assigned to you in this week's and next week's sprints, across all workspaces and projects. Plan ${data?.capacity ?? 8} points per sprint in total; stories added from Tuesday 00:00 use your ${data?.buffer_capacity ?? 2}-point buffer (Plane User Convention).`}
           </p>
-          <CustomSearchSelect
-            value={data?.user.id ?? me?.id}
-            onChange={handlePersonChange}
-            options={options}
-            label={
-              <span className="text-13">{data ? (data.user.is_me ? "My sprint" : data.user.full_name) : "…"}</span>
-            }
-            maxHeight="md"
-            placement="bottom-end"
-            noResultsMessage="No teammate found"
-          />
+          <div className="flex items-center gap-2">
+            <LayoutToggle layout={layout} onChange={setLayout} />
+            <CustomSearchSelect
+              value={data?.user.id ?? me?.id}
+              onChange={handlePersonChange}
+              options={options}
+              label={
+                <span className="text-13">{data ? (data.user.is_me ? "My sprint" : data.user.full_name) : "…"}</span>
+              }
+              maxHeight="md"
+              placement="bottom-end"
+              noResultsMessage="No teammate found"
+            />
+          </div>
         </div>
         {data?.user.is_me && <CapacitySettings data={data} onSaved={() => void mutate()} />}
         {error && <p className="text-13 text-danger-primary">Could not load this sprint. Refresh to try again.</p>}
@@ -297,6 +416,7 @@ export function MySprintRoot() {
             capacity={data.capacity}
             bufferCapacity={data.buffer_capacity}
             isMe={data.user.is_me}
+            layout={layout}
           />
         ))}
       </div>
