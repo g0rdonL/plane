@@ -31,6 +31,7 @@ from plane.utils.content_validator import (
     validate_html_content,
     validate_binary_data,
 )
+from plane.utils.sprint import SPRINT_BACKLOG_ERROR, is_backlog_in_sprint
 
 from .base import BaseSerializer
 from .cycle import CycleLiteSerializer, CycleSerializer
@@ -117,6 +118,10 @@ class IssueSerializer(BaseSerializer):
             data["labels"] = Label.objects.filter(
                 project_id=self.context.get("project_id"), id__in=data["labels"]
             ).values_list("id", flat=True)
+
+        # Aight fork: stories in a sprint can't go back to Backlog
+        if is_backlog_in_sprint(self.instance, data.get("state")):
+            raise serializers.ValidationError({"state": SPRINT_BACKLOG_ERROR})
 
         # Check state is from the project only else raise validation error
         if (
