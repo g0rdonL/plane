@@ -259,7 +259,8 @@ function SprintSection({
   isMe: boolean;
   layout: TLayout;
 }) {
-  // Done and cancelled stories are crossed out and leave the sums the capacity is checked against.
+  // Done and cancelled stories are crossed out; the API drops them from these sums only if they finished
+  // before planning closed (or were cancelled), so work done mid-sprint still fills the week's capacity.
   const planned = sprint.remaining_points ?? sprint.planned_points;
   const buffer = sprint.remaining_buffer_points ?? sprint.buffer_points;
   const over = planned > capacity;
