@@ -30,6 +30,7 @@ from plane.db.models import (
 from plane.utils.analytics_plot import burndown_plot
 from plane.bgtasks.issue_activities_task import issue_activity
 from plane.utils.host import base_host
+from plane.utils.sprint import promote_sprint_backlog
 
 
 def transfer_cycle_issues(
@@ -472,6 +473,12 @@ def transfer_cycle_issues(
         ),
         epoch=int(timezone.now().timestamp()),
         notification=True,
+        origin=base_host(request=request, is_app=True),
+    )
+    promote_sprint_backlog(
+        [cycle_issue.issue_id for cycle_issue in updated_cycles],
+        project_id,
+        user_id,
         origin=base_host(request=request, is_app=True),
     )
 

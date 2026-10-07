@@ -35,6 +35,7 @@ from plane.app.permissions import allow_permission, ROLE
 from plane.utils.host import base_host
 from plane.utils.filters import ComplexFilterBackend
 from plane.utils.filters import IssueFilterSet
+from plane.utils.sprint import promote_sprint_backlog
 
 
 class CycleIssueViewSet(BaseViewSet):
@@ -314,7 +315,13 @@ class CycleIssueViewSet(BaseViewSet):
             notification=True,
             origin=base_host(request=request, is_app=True),
         )
-        return Response({"message": "success"}, status=status.HTTP_201_CREATED)
+        promoted = promote_sprint_backlog(
+            new_issues + existing_issues,
+            project_id,
+            request.user.id,
+            origin=base_host(request=request, is_app=True),
+        )
+        return Response({"message": "success", "promoted": promoted}, status=status.HTTP_201_CREATED)
 
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER])
     def destroy(self, request, slug, project_id, cycle_id, issue_id):
