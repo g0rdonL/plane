@@ -5,6 +5,9 @@
 # Aight fork: every project needs the carry-over label (Performance Evaluation §2).
 # Idempotent; copies colour and description from an existing carry-over label in the workspace.
 
+# Third party imports
+from crum import impersonate
+
 # Django imports
 from django.core.management.base import BaseCommand, CommandError
 
@@ -35,15 +38,14 @@ class Command(BaseCommand):
                 created += 1
                 continue
             template = Label.objects.filter(workspace=project.workspace, name__iexact=CARRY_OVER).first()
-            Label.objects.create(
-                name=CARRY_OVER,
-                color=template.color if template else DEFAULT_COLOR,
-                description=template.description if template else "",
-                project=project,
-                workspace=project.workspace,
-                created_by=actor,
-                updated_by=actor,
-            )
+            with impersonate(actor):
+                Label.objects.create(
+                    name=CARRY_OVER,
+                    color=template.color if template else DEFAULT_COLOR,
+                    description=template.description if template else "",
+                    project=project,
+                    workspace=project.workspace,
+                )
             created += 1
 
         verb = "Would create" if options["dry_run"] else "Created"

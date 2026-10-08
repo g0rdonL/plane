@@ -213,4 +213,5 @@ class TestEnsureCarryOverLabel:
 
         created = Label.objects.get(project=project, name="carry-over")
         assert (created.color, created.description) == ("#123456", "moved")
+        assert created.created_by == create_user
         assert Label.objects.filter(name="carry-over").count() == 2
