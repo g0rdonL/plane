@@ -1489,7 +1489,9 @@ class IssueCommentListCreateAPIEndpoint(BaseAPIView):
 
             issue_activity.delay(
                 type="comment.activity.created",
-                requested_data=json.dumps(serializer.data, cls=DjangoJSONEncoder),
+                # The create serializer has no "id"; without it the activity is not linked to the
+                # comment and comment @-mentions never notify.
+                requested_data=json.dumps({**serializer.data, "id": str(issue_comment.id)}, cls=DjangoJSONEncoder),
                 actor_id=str(issue_comment.created_by_id),
                 issue_id=str(self.kwargs.get("issue_id")),
                 project_id=str(self.kwargs.get("project_id")),
