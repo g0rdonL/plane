@@ -1,6 +1,6 @@
 # Momentum analytics — design spec (Aight fork)
 
-Date: 2026-10-09. Target branch: `preview`. Author: Gordon Lee (spec drafted with Claude).
+Date: 2026-10-09. Target branch: `aight/epics`. Author: Gordon Lee (spec drafted with Claude).
 
 ## Problem
 
