@@ -7,7 +7,7 @@ import datetime as dt
 import zoneinfo
 
 # Django imports
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef, Q, Subquery
 from django.db.models.functions import Greatest
 from django.utils import timezone
 
@@ -17,6 +17,7 @@ from rest_framework.response import Response
 
 # Module imports
 from .. import BaseAPIView
+from plane.app.permissions import ROLE
 from plane.db.models import Cycle, CycleIssue, Issue, IssueActivity, Profile, ProjectMember, User, WorkspaceMember
 
 # Aight fork: sprints are weekly, Monday 00:00 to Sunday 23:59 Bangkok time. By default each IC plans
@@ -254,19 +255,22 @@ class SprintCapacityEndpoint(BaseAPIView):
 
 
 class SprintCapacityPeopleEndpoint(BaseAPIView):
-    """People whose My sprint the requesting user may open: everyone sharing a workspace with them."""
+    """People whose My sprint the requesting user may open: Members and Admins sharing a workspace with
+    them (Guests such as tester or bot logins are left out), plus the viewer themself."""
 
     def get(self, request):
         viewer_ws = WorkspaceMember.objects.filter(member=request.user, is_active=True).values_list(
             "workspace_id", flat=True
         )
+        teammates = User.objects.filter(
+            member_workspace__workspace_id__in=viewer_ws,
+            member_workspace__is_active=True,
+            member_workspace__role__gte=ROLE.MEMBER.value,
+            is_active=True,
+            is_bot=False,
+        )
         people = (
-            User.objects.filter(
-                member_workspace__workspace_id__in=viewer_ws,
-                member_workspace__is_active=True,
-                is_active=True,
-                is_bot=False,
-            )
+            User.objects.filter(Q(id__in=teammates.values("id")) | Q(id=request.user.id))
             .distinct()
             .order_by("first_name", "last_name", "display_name")
         )
