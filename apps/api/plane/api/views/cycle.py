@@ -49,7 +49,7 @@ from plane.db.models import (
 from plane.utils.cycle_transfer_issues import transfer_cycle_issues
 from plane.utils.order_queryset import CYCLE_ORDER_BY_ALLOWLIST, ISSUE_ORDER_BY_ALLOWLIST, sanitize_order_by
 from plane.utils.host import base_host
-from plane.utils.sprint import promote_sprint_backlog
+from plane.utils.sprint import apply_sprint_defaults
 from .base import BaseAPIView
 from plane.bgtasks.webhook_task import model_activity
 from plane.utils.openapi.decorators import cycle_docs
@@ -1060,7 +1060,7 @@ class CycleIssueListCreateAPIEndpoint(BaseAPIView):
             notification=True,
             origin=base_host(request=request, is_app=True),
         )
-        promote_sprint_backlog(
+        apply_sprint_defaults(
             new_issues + existing_issues,
             project_id,
             request.user.id,

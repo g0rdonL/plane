@@ -40,7 +40,8 @@ def sprint_issue_q(values, prefix=""):
 
 
 # Aight fork: a story in a sprint is never Backlog. Adding one promotes it to Todo,
-# and moving one back to Backlog is rejected until it leaves the sprint.
+# and moving one back to Backlog is rejected until it leaves the sprint. Adding a story
+# with no priority also defaults it to Medium (a default only: clearing it later is allowed).
 SPRINT_BACKLOG_ERROR = "Stories in a sprint can't be in Backlog. Remove it from the sprint first."
 
 
@@ -74,36 +75,64 @@ def sprint_todo_state(project_id):
     return State.objects.filter(project_id=project_id, group="unstarted").order_by("-default", "sequence").first()
 
 
-def promote_sprint_backlog(issue_ids, project_id, actor_id, origin=None):
-    """Move backlog-group issues among issue_ids to Todo. Returns {issue_id: new_state_id}."""
+SPRINT_DEFAULT_PRIORITY = "medium"
+
+
+def sprint_defaults_q():
+    """Q selecting issues that adding to a sprint would change (Backlog state or no priority)."""
+    return Q(state__group="backlog") | Q(priority="none")
+
+
+def apply_sprint_defaults(issue_ids, project_id, actor_id, origin=None):
+    """Move Backlog issues among issue_ids to Todo and set empty priority to Medium.
+
+    Returns {issue_id: {field: new_value}} for the issues that changed.
+    """
     import json
 
     from plane.bgtasks.issue_activities_task import issue_activity
     from plane.db.models import Issue
 
-    backlog = list(
-        Issue.issue_objects.filter(project_id=project_id, pk__in=issue_ids, state__group="backlog").values_list(
-            "id", "state_id"
+    rows = list(
+        Issue.issue_objects.filter(sprint_defaults_q(), project_id=project_id, pk__in=issue_ids).values_list(
+            "id", "state_id", "state__group", "priority"
         )
     )
-    todo = sprint_todo_state(project_id) if backlog else None
-    if todo is None:
+    todo = sprint_todo_state(project_id) if any(group == "backlog" for _, _, group, _ in rows) else None
+
+    changes = {}
+    for issue_id, state_id, group, priority in rows:
+        requested, current = {}, {}
+        if group == "backlog" and todo is not None:
+            requested["state_id"], current["state_id"] = str(todo.id), str(state_id)
+        if priority == "none":
+            requested["priority"], current["priority"] = SPRINT_DEFAULT_PRIORITY, priority
+        if requested:
+            changes[issue_id] = (requested, current)
+    if not changes:
         return {}
 
-    Issue.objects.filter(pk__in=[issue_id for issue_id, _ in backlog]).update(
-        state=todo, updated_by_id=actor_id, updated_at=timezone.now()
-    )
-    epoch = int(timezone.now().timestamp())
-    for issue_id, old_state_id in backlog:
+    now = timezone.now()
+    promote_ids = [issue_id for issue_id, (requested, _) in changes.items() if "state_id" in requested]
+    priority_ids = [issue_id for issue_id, (requested, _) in changes.items() if "priority" in requested]
+    if promote_ids:
+        Issue.objects.filter(pk__in=promote_ids).update(state=todo, updated_by_id=actor_id, updated_at=now)
+    if priority_ids:
+        Issue.objects.filter(pk__in=priority_ids).update(
+            priority=SPRINT_DEFAULT_PRIORITY, updated_by_id=actor_id, updated_at=now
+        )
+
+    epoch = int(now.timestamp())
+    for issue_id, (requested, current) in changes.items():
         issue_activity.delay(
             type="issue.activity.updated",
-            requested_data=json.dumps({"state_id": str(todo.id)}),
+            requested_data=json.dumps(requested),
             actor_id=str(actor_id),
             issue_id=str(issue_id),
             project_id=str(project_id),
-            current_instance=json.dumps({"state_id": str(old_state_id)}),
+            current_instance=json.dumps(current),
             epoch=epoch,
             notification=False,
             origin=origin,
         )
-    return {str(issue_id): str(todo.id) for issue_id, _ in backlog}
+    return {str(issue_id): requested for issue_id, (requested, _) in changes.items()}

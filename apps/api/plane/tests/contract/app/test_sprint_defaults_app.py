@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # See the LICENSE file for details.
 
-"""Aight fork: a story in a sprint is never Backlog."""
+"""Aight fork: a story in a sprint is never Backlog, and gets Medium priority if it had none."""
 
 from datetime import timedelta
 
@@ -37,8 +37,10 @@ def states(project, workspace):
 
 @pytest.fixture
 def make_issue(project, workspace, create_user):
-    def make(state, name="Story"):
-        return Issue.objects.create(name=name, project=project, workspace=workspace, state=state, created_by=create_user)
+    def make(state, name="Story", priority="high"):
+        return Issue.objects.create(
+            name=name, project=project, workspace=workspace, state=state, priority=priority, created_by=create_user
+        )
 
     return make
 
@@ -88,11 +90,50 @@ class TestSprintBacklog:
         )
 
         assert response.status_code == status.HTTP_201_CREATED, response.data
-        assert response.data["promoted"] == {str(backlog_story.id): str(states["todo"].id)}
+        assert response.data["sprint_defaults"] == {str(backlog_story.id): {"state_id": str(states["todo"].id)}}
         backlog_story.refresh_from_db()
         started_story.refresh_from_db()
         assert backlog_story.state_id == states["todo"].id
         assert started_story.state_id == states["started"].id
+
+    @pytest.mark.django_db
+    def test_adding_story_without_priority_sets_medium(
+        self, session_client, workspace, project, states, make_issue, make_cycle
+    ):
+        backlog_story = make_issue(states["backlog"], priority="none")
+        todo_story = make_issue(states["todo"], priority="none")
+        low_story = make_issue(states["todo"], priority="low")
+        cycle = make_cycle()
+
+        response = session_client.post(
+            self.cycle_url(workspace.slug, project.id, cycle.id),
+            {"issues": [str(backlog_story.id), str(todo_story.id), str(low_story.id)]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED, response.data
+        assert response.data["sprint_defaults"] == {
+            str(backlog_story.id): {"state_id": str(states["todo"].id), "priority": "medium"},
+            str(todo_story.id): {"priority": "medium"},
+        }
+        for story, priority in ((backlog_story, "medium"), (todo_story, "medium"), (low_story, "low")):
+            story.refresh_from_db()
+            assert story.priority == priority
+
+    @pytest.mark.django_db
+    def test_clearing_priority_on_sprint_story_is_allowed(
+        self, session_client, workspace, project, states, make_issue, make_cycle
+    ):
+        story = make_issue(states["todo"], priority="medium")
+        in_cycle(story, make_cycle())
+
+        response = session_client.patch(
+            self.issue_url(workspace.slug, project.id, story.id), {"priority": "none"}, format="json"
+        )
+
+        assert response.status_code == status.HTTP_204_NO_CONTENT, response.data
+        story.refresh_from_db()
+        assert story.priority == "none"
 
     @pytest.mark.django_db
     def test_moving_backlog_story_between_sprints_promotes_it(
@@ -146,17 +187,21 @@ class TestSprintBacklog:
 
     @pytest.mark.django_db
     def test_backfill_command(self, workspace, project, states, make_issue, make_cycle, create_user):
-        open_story = make_issue(states["backlog"], name="Open sprint")
-        old_story = make_issue(states["backlog"], name="Old sprint")
+        open_story = make_issue(states["backlog"], name="Open sprint", priority="none")
+        unprioritised = make_issue(states["started"], name="No priority", priority="none")
+        old_story = make_issue(states["backlog"], name="Old sprint", priority="none")
         in_cycle(open_story, make_cycle())
+        in_cycle(unprioritised, make_cycle())
         in_cycle(old_story, make_cycle(end_offset_days=-2))
 
-        call_command("promote_sprint_backlog", "--actor", create_user.email, "--dry-run")
+        call_command("apply_sprint_defaults", "--actor", create_user.email, "--dry-run")
         open_story.refresh_from_db()
         assert open_story.state_id == states["backlog"].id
+        assert open_story.priority == "none"
 
-        call_command("promote_sprint_backlog", "--actor", create_user.email)
-        open_story.refresh_from_db()
-        old_story.refresh_from_db()
-        assert open_story.state_id == states["todo"].id
-        assert old_story.state_id == states["backlog"].id
+        call_command("apply_sprint_defaults", "--actor", create_user.email)
+        for story in (open_story, unprioritised, old_story):
+            story.refresh_from_db()
+        assert (open_story.state_id, open_story.priority) == (states["todo"].id, "medium")
+        assert (unprioritised.state_id, unprioritised.priority) == (states["started"].id, "medium")
+        assert (old_story.state_id, old_story.priority) == (states["backlog"].id, "none")
