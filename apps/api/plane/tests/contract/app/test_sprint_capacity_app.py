@@ -233,6 +233,17 @@ class TestTeammateSprint:
         assert str(teammate.id) in ids and str(create_user.id) in ids
         assert str(stranger.id) not in ids and str(bot.id) not in ids
 
+    @pytest.mark.django_db
+    def test_people_leaves_out_guests_but_not_a_guest_viewer(self, api_client, session_client, workspace, create_user):
+        guest = make_user("guest2@plane.so", workspace, role=5)
+        ids = {p["id"] for p in session_client.get(URL + "people/").data}
+        assert str(create_user.id) in ids and str(guest.id) not in ids
+
+        api_client.force_authenticate(user=guest)
+        people = api_client.get(URL + "people/").data
+        assert {p["id"] for p in people if p["is_me"]} == {str(guest.id)}
+        assert str(create_user.id) in {p["id"] for p in people}
+
 
 def collect_ids(payload):
     ids = set()
