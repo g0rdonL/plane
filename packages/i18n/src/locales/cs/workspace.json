@@ -85,6 +85,7 @@
     "p85_lead_time": "85th percentile lead time",
     "last_n_weeks": "Last {count} weeks",
     "last_n_days": "Last {count} days",
+    "momentum_empty_state": "No stories yet. Add stories to your projects to start tracking momentum.",
     "label": "Analytika",
     "page_label": "{workspace} - Analytika",
     "open_tasks": "Celkem otevřených úkolů",
