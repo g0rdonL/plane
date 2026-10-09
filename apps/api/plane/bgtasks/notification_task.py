@@ -227,9 +227,13 @@ def notifications(
             2. From the latest set of mentions, extract the users which are not a subscribers & make them subscribers
             """
 
-            # get the list of active project members
-            project_members = ProjectMember.objects.filter(project_id=project_id, is_active=True).values_list(
-                "member_id", flat=True
+            # get the list of active project members who can receive notifications. Bot users have no
+            # UserNotificationPreference row: the .get() below would raise and drop this activity's
+            # notifications for everyone, so leave them (and any other user without one) out.
+            project_members = (
+                ProjectMember.objects.filter(project_id=project_id, is_active=True, member__is_bot=False)
+                .filter(member_id__in=UserNotificationPreference.objects.values("user_id"))
+                .values_list("member_id", flat=True)
             )
 
             # Get new mentions from the newer instance
