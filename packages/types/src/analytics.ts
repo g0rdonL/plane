@@ -37,8 +37,15 @@ export enum ChartYAxisMetric {
   EPIC_WORK_ITEM_COUNT = "EPIC_WORK_ITEM_COUNT",
 }
 
-export type TAnalyticsTabsBase = "overview" | "work-items";
-export type TAnalyticsGraphsBase = "projects" | "work-items" | "custom-work-items";
+export type TAnalyticsTabsBase = "overview" | "work-items" | "momentum";
+export type TAnalyticsGraphsBase =
+  | "projects"
+  | "work-items"
+  | "custom-work-items"
+  | "velocity"
+  | "throughput"
+  | "cycle-time"
+  | "cumulative-flow";
 export interface AnalyticsTab {
   key: TAnalyticsTabsBase;
   label: string;
@@ -49,6 +56,8 @@ export type TAnalyticsFilterParams = {
   project_ids?: string;
   cycle_id?: string;
   module_id?: string;
+  weeks?: number;
+  days?: number;
 };
 
 // service types

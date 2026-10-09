@@ -100,6 +100,40 @@ export const ANALYTICS_INSIGHTS_FIELDS: Record<TAnalyticsTabsBase, IInsightField
       i18nKey: "workspace_analytics.completed_work_items",
     },
   ],
+  momentum: [
+    {
+      key: "avg_velocity",
+      i18nKey: "workspace_analytics.avg_velocity",
+    },
+    {
+      key: "last_sprint_velocity",
+      i18nKey: "workspace_analytics.last_sprint_velocity",
+    },
+    {
+      key: "commitment_reliability",
+      i18nKey: "workspace_analytics.commitment_reliability",
+    },
+    {
+      key: "avg_throughput",
+      i18nKey: "workspace_analytics.avg_throughput",
+    },
+    {
+      key: "median_cycle_time",
+      i18nKey: "workspace_analytics.median_cycle_time",
+    },
+    {
+      key: "p85_cycle_time",
+      i18nKey: "workspace_analytics.p85_cycle_time",
+    },
+    {
+      key: "median_lead_time",
+      i18nKey: "workspace_analytics.median_lead_time",
+    },
+    {
+      key: "p85_lead_time",
+      i18nKey: "workspace_analytics.p85_lead_time",
+    },
+  ],
 };
 
 export const ANALYTICS_DURATION_FILTER_OPTIONS = [
