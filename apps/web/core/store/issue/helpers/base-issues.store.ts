@@ -819,8 +819,8 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
     const response = await this.issueService.addIssueToCycle(workspaceSlug, projectId, cycleId, {
       issues: issueIds,
     });
-    // Aight fork: the server moves Backlog stories added to a sprint to Todo
-    const promoted: Record<string, string> = response?.promoted ?? {};
+    // Aight fork: the server moves Backlog stories added to a sprint to Todo and defaults empty priority to Medium
+    const sprintDefaults: Record<string, Partial<TIssue>> = response?.sprint_defaults ?? {};
 
     // if cycle Id is the current Cycle Id then call fetch parent stats
     if (this.cycleId === cycleId) this.fetchParentStats(workspaceSlug, projectId);
@@ -838,8 +838,7 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
 
     // For Each issue update cycle Id by calling current store's update Issue, without making an API call
     issueIds.forEach((issueId) => {
-      const stateUpdate = promoted[issueId] ? { state_id: promoted[issueId] } : {};
-      this.issueUpdate(workspaceSlug, projectId, issueId, { cycle_id: cycleId, ...stateUpdate }, false);
+      this.issueUpdate(workspaceSlug, projectId, issueId, { cycle_id: cycleId, ...sprintDefaults[issueId] }, false);
     });
   }
 
@@ -907,9 +906,9 @@ export abstract class BaseIssuesStore implements IBaseIssuesStore {
       const response = await this.issueService.addIssueToCycle(workspaceSlug, projectId, cycleId, {
         issues: [issueId],
       });
-      // Aight fork: the server moves Backlog stories added to a sprint to Todo
-      const promotedStateId: string | undefined = response?.promoted?.[issueId];
-      if (promotedStateId) this.issueUpdate(workspaceSlug, projectId, issueId, { state_id: promotedStateId }, false);
+      // Aight fork: the server moves Backlog stories added to a sprint to Todo and defaults empty priority to Medium
+      const sprintDefaults: Partial<TIssue> | undefined = response?.sprint_defaults?.[issueId];
+      if (sprintDefaults) this.issueUpdate(workspaceSlug, projectId, issueId, sprintDefaults, false);
 
       // if cycle Id is the current Cycle Id then call fetch parent stats
       if (this.cycleId === cycleId || this.cycleId === issueCycleId)

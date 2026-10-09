@@ -41,7 +41,7 @@ from .. import BaseViewSet
 from plane.bgtasks.issue_activities_task import issue_activity
 from plane.utils.issue_filters import issue_filters
 from plane.utils.host import base_host
-from plane.utils.sprint import promote_sprint_backlog
+from plane.utils.sprint import apply_sprint_defaults
 
 
 class WorkspaceDraftIssueViewSet(BaseViewSet):
@@ -246,7 +246,7 @@ class WorkspaceDraftIssueViewSet(BaseViewSet):
                     created_by_id=draft_issue.created_by_id,
                     updated_by_id=draft_issue.updated_by_id,
                 )
-                promote_sprint_backlog(
+                apply_sprint_defaults(
                     [serializer.data.get("id")],
                     draft_issue.project_id,
                     request.user.id,
