@@ -13,8 +13,11 @@ export class SprintCapacityService extends APIService {
     super(API_BASE_URL);
   }
 
-  async getSprintCapacity(userId?: string): Promise<TSprintCapacity> {
-    return this.get(`/api/users/me/sprint-capacity/`, { params: userId ? { user_id: userId } : {} })
+  async getSprintCapacity(userId?: string, offsets?: number[]): Promise<TSprintCapacity> {
+    const params: Record<string, string> = {};
+    if (userId) params.user_id = userId;
+    if (offsets) params.offsets = offsets.join(",");
+    return this.get(`/api/users/me/sprint-capacity/`, { params })
       .then((response) => response?.data)
       .catch((error) => {
         throw error?.response?.data;
