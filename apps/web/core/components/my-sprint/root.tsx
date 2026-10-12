@@ -246,18 +246,30 @@ function SprintBoard({ items }: { items: TSprintCapacityItem[] }) {
   );
 }
 
+// Relative name for a sprint `offset` weeks from the current one.
+function weekLabel(offset: number): string {
+  if (offset === 0) return "this week";
+  if (offset === 1) return "next week";
+  if (offset === -1) return "last week";
+  const weeks = Math.abs(offset);
+  return offset < 0 ? `${weeks} weeks ago` : `in ${weeks} weeks`;
+}
+
 function SprintSection({
   sprint,
   capacity,
   bufferCapacity,
   isMe,
   layout,
+  offset,
 }: {
   sprint: TSprintCapacitySprint;
   capacity: number;
   bufferCapacity: number;
   isMe: boolean;
   layout: TLayout;
+  /** weeks from the current sprint; 0 is this week */
+  offset: number;
 }) {
   // Done and cancelled stories are crossed out; the API drops them from these sums only if they finished
   // before planning closed (or were cancelled), so work done mid-sprint still fills the week's capacity.
@@ -273,7 +285,7 @@ function SprintSection({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-16 font-semibold text-primary">
-            {sprint.label} {sprint.is_current ? "· this week" : "· next week"}
+            {sprint.label} · {weekLabel(offset)}
           </h2>
           <p className="text-12 text-tertiary">
             {formatRange(sprint.start_date, sprint.end_date)} · {formatPoints(sprint.done_points)} pts done
@@ -350,18 +362,41 @@ function LayoutToggle({ layout, onChange }: { layout: TLayout; onChange: (layout
   );
 }
 
+// Which weeks the page shows, as offsets from the current sprint (the API accepts -12..4). The `from` query
+// param holds the first offset; the default pair keeps the URL clean.
+const SPRINT_RANGE_OPTIONS: { value: string; label: string; offsets: number[] }[] = [
+  { value: "0", label: "This week & next", offsets: [0, 1] },
+  { value: "-1", label: "Last week & this", offsets: [-1, 0] },
+  { value: "-2", label: "Last 2 weeks & this", offsets: [-2, -1, 0] },
+  { value: "-4", label: "Last 4 weeks & this", offsets: [-4, -3, -2, -1, 0] },
+  { value: "-8", label: "Last 8 weeks & this", offsets: [-8, -7, -6, -5, -4, -3, -2, -1, 0] },
+];
+const DEFAULT_RANGE = SPRINT_RANGE_OPTIONS[0];
+
 export function MySprintRoot() {
   const router = useAppRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const userId = searchParams.get("user") ?? undefined;
+  // An unknown `from` falls back to the default range rather than sending an offset the API rejects.
+  const range = SPRINT_RANGE_OPTIONS.find((option) => option.value === searchParams.get("from")) ?? DEFAULT_RANGE;
+  const offsets = range.offsets;
+  const navigate = (changes: Record<string, string | undefined>) => {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const [key, value] of Object.entries(changes)) {
+      if (value === undefined) params.delete(key);
+      else params.set(key, value);
+    }
+    const query = params.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
+  };
   const { storedValue, setValue: setLayout } = useLocalStorage<TLayout>("my_sprint_layout", "list");
   const layout = storedValue ?? "list";
 
   const { data: people } = useSWR("MY_SPRINT_PEOPLE", () => service.getPeople(), { revalidateOnFocus: false });
   const { data, error, mutate } = useSWR(
-    `MY_SPRINT_CAPACITY_${userId ?? "me"}`,
-    () => service.getSprintCapacity(userId),
+    `MY_SPRINT_CAPACITY_${userId ?? "me"}_${offsets.join(",")}`,
+    () => service.getSprintCapacity(userId, offsets),
     {
       revalidateOnFocus: true,
     }
@@ -376,7 +411,8 @@ export function MySprintRoot() {
       content: <span className="truncate">{name}</span>,
     };
   });
-  const handlePersonChange = (id: string) => router.push(id === me?.id ? pathname : `${pathname}?user=${id}`);
+  const handlePersonChange = (id: string) => navigate({ user: id === me?.id ? undefined : id });
+  const handleRangeChange = (value: string) => navigate({ from: value === DEFAULT_RANGE.value ? undefined : value });
 
   return (
     <div className="h-full w-full overflow-y-auto">
@@ -384,11 +420,24 @@ export function MySprintRoot() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="max-w-xl text-13 text-secondary">
             {data?.user.is_me === false
-              ? `${data.user.full_name}'s stories in this week's and next week's sprints, across all workspaces. Stories in projects you can't access are counted but not shown.`
-              : `Everything assigned to you in this week's and next week's sprints, across all workspaces and projects. Plan ${data?.capacity ?? 8} points per sprint in total; stories added from Tuesday 00:00 use your ${data?.buffer_capacity ?? 2}-point buffer (Plane User Convention).`}
+              ? `${data.user.full_name}'s stories in the selected sprints, across all workspaces. Stories in projects you can't access are counted but not shown.`
+              : `Everything assigned to you in the selected sprints, across all workspaces and projects. Plan ${data?.capacity ?? 8} points per sprint in total; stories added from Tuesday 00:00 use your ${data?.buffer_capacity ?? 2}-point buffer (Plane User Convention).`}
           </p>
           <div className="flex items-center gap-2">
             <LayoutToggle layout={layout} onChange={setLayout} />
+            <CustomSearchSelect
+              value={range.value}
+              onChange={handleRangeChange}
+              options={SPRINT_RANGE_OPTIONS.map((option) => ({
+                value: option.value,
+                query: option.label,
+                content: <span className="truncate">{option.label}</span>,
+              }))}
+              label={<span className="text-13">{range.label}</span>}
+              maxHeight="md"
+              placement="bottom-end"
+              noResultsMessage="No range found"
+            />
             <CustomSearchSelect
               value={data?.user.id ?? me?.id}
               onChange={handlePersonChange}
@@ -410,7 +459,7 @@ export function MySprintRoot() {
             <Loader.Item height="160px" />
           </Loader>
         )}
-        {data?.sprints.map((sprint) => (
+        {data?.sprints.map((sprint, index) => (
           <SprintSection
             key={sprint.label}
             sprint={sprint}
@@ -418,6 +467,7 @@ export function MySprintRoot() {
             bufferCapacity={data.buffer_capacity}
             isMe={data.user.is_me}
             layout={layout}
+            offset={offsets[index] ?? 0}
           />
         ))}
       </div>
