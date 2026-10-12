@@ -20,7 +20,7 @@ import { getDate, renderFormattedPayloadDate, generateWorkItemLink } from "@plan
 // components
 import { DateDropdown } from "@/components/dropdowns/date";
 import { IntakeStateDropdown } from "@/components/dropdowns/intake-state/dropdown";
-import { MemberDropdown } from "@/components/dropdowns/member/dropdown";
+import { AssigneeDropdown } from "@/components/dropdowns/member/assignee";
 import { PriorityDropdown } from "@/components/dropdowns/priority";
 import { StateDropdown } from "@/components/dropdowns/state/dropdown";
 import type { TIssueOperations } from "@/components/issues/issue-detail";
@@ -93,7 +93,7 @@ export const InboxIssueContentProperties = observer(function InboxIssueContentPr
                 <MembersPropertyIcon className="h-4 w-4 flex-shrink-0" />
                 <span>Assignees</span>
               </div>
-              <MemberDropdown
+              <AssigneeDropdown
                 value={issue?.assignee_ids ?? []}
                 onChange={(val) =>
                   issue?.id && issueOperations.update(workspaceSlug, projectId, issue?.id, { assignee_ids: val })
@@ -101,7 +101,6 @@ export const InboxIssueContentProperties = observer(function InboxIssueContentPr
                 disabled={!isEditable}
                 projectId={projectId?.toString() ?? ""}
                 placeholder="Add assignees"
-                multiple
                 buttonVariant={
                   (issue?.assignee_ids || [])?.length > 0 ? "transparent-without-text" : "transparent-with-text"
                 }

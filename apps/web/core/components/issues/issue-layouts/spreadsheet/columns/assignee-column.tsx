@@ -9,7 +9,7 @@ import { observer } from "mobx-react";
 // types
 import type { TIssue } from "@plane/types";
 // components
-import { MemberDropdown } from "@/components/dropdowns/member/dropdown";
+import { AssigneeDropdown } from "@/components/dropdowns/member/assignee";
 
 type Props = {
   issue: TIssue;
@@ -23,7 +23,7 @@ export const SpreadsheetAssigneeColumn = observer(function SpreadsheetAssigneeCo
 
   return (
     <div className="h-11 border-b-[0.5px] border-subtle">
-      <MemberDropdown
+      <AssigneeDropdown
         value={issue?.assignee_ids ?? []}
         onChange={(data) => {
           onChange(
@@ -37,7 +37,6 @@ export const SpreadsheetAssigneeColumn = observer(function SpreadsheetAssigneeCo
         }}
         projectId={issue?.project_id ?? undefined}
         disabled={disabled}
-        multiple
         placeholder="Assignees"
         buttonVariant={
           issue?.assignee_ids && issue.assignee_ids.length > 1 ? "transparent-without-text" : "transparent-with-text"

@@ -250,6 +250,9 @@ class IssueCreateSerializer(BaseSerializer):
         child=serializers.PrimaryKeyRelatedField(queryset=User.objects.all()),
         write_only=True,
         required=False,
+        # a story has at most one assignee
+        max_length=1,
+        error_messages={"max_length": "A work item can only have one assignee."},
     )
 
     labels = serializers.ListField(

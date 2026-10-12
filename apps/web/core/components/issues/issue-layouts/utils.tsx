@@ -578,7 +578,10 @@ export const handleGroupDragDrop = async (
     let groupValue: any = clone(sourceIssue[groupKey]);
 
     // If groupValues is an array, remove source groupId and add destination groupId
-    if (Array.isArray(groupValue)) {
+    // a story has at most one assignee, so dropping into an assignee column replaces rather than adds
+    if (groupKey === "assignee_ids") {
+      groupValue = destination.groupId === "None" ? [] : [destination.groupId];
+    } else if (Array.isArray(groupValue)) {
       pull(groupValue, source.groupId);
       if (destination.groupId !== "None") groupValue = uniq(concat(groupValue, [destination.groupId]));
     } // else just update the groupValue based on destination groupId
@@ -598,7 +601,10 @@ export const handleGroupDragDrop = async (
     let subGroupValue: any = clone(sourceIssue[subGroupKey]);
 
     // If subGroupValue is an array, remove source subGroupId and add destination subGroupId
-    if (Array.isArray(subGroupValue)) {
+    // a story has at most one assignee, so dropping into an assignee column replaces rather than adds
+    if (subGroupKey === "assignee_ids") {
+      subGroupValue = destination.subGroupId === "None" ? [] : [destination.subGroupId];
+    } else if (Array.isArray(subGroupValue)) {
       pull(subGroupValue, source.subGroupId);
       if (destination.subGroupId !== "None") subGroupValue = uniq(concat(subGroupValue, [destination.subGroupId]));
     } // else just update the subGroupValue based on destination subGroupId

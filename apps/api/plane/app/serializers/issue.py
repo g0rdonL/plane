@@ -97,6 +97,9 @@ class IssueCreateSerializer(BaseSerializer):
         child=serializers.PrimaryKeyRelatedField(queryset=User.objects.all()),
         write_only=True,
         required=False,
+        # a story has at most one assignee
+        max_length=1,
+        error_messages={"max_length": "A work item can only have one assignee."},
     )
     project_id = serializers.UUIDField(source="project.id", read_only=True)
     workspace_id = serializers.UUIDField(source="workspace.id", read_only=True)

@@ -1,3 +1,4 @@
+// oxlint-disable promise/always-return
 /**
  * Copyright (c) 2023-present Plane Software, Inc. and contributors
  * SPDX-License-Identifier: AGPL-3.0-only
@@ -103,11 +104,9 @@ export const usePowerKWorkItemContextBasedCommands = (): TPowerKCommandConfig[] 
     (assigneeId: string) => {
       if (!entityDetails) return;
 
-      const updatedAssignees = [...(entityDetails.assignee_ids ?? [])];
-      if (updatedAssignees.includes(assigneeId)) updatedAssignees.splice(updatedAssignees.indexOf(assigneeId), 1);
-      else updatedAssignees.push(assigneeId);
-
-      handleUpdateEntity({ assignee_ids: updatedAssignees });
+      // a story has at most one assignee: picking someone replaces, picking the current one clears
+      const isAssigned = entityDetails.assignee_ids?.includes(assigneeId);
+      handleUpdateEntity({ assignee_ids: isAssigned ? [] : [assigneeId] });
     },
     [entityDetails, handleUpdateEntity]
   );
@@ -251,7 +250,7 @@ export const usePowerKWorkItemContextBasedCommands = (): TPowerKCommandConfig[] 
       shortcut: "a",
       isEnabled: () => isEditingAllowed,
       isVisible: () => isEditingAllowed,
-      closeOnSelect: false,
+      closeOnSelect: true,
     },
     {
       id: "assign_work_item_to_me",
