@@ -5,6 +5,8 @@
  */
 
 import { observer } from "mobx-react";
+import { Repeat } from "lucide-react";
+import { IssueRecurrenceProperty } from "@/components/issues/recurrence";
 // i18n
 import { useTranslation } from "@plane/i18n";
 // ui icons
@@ -181,6 +183,15 @@ export const PeekOverviewProperties = observer(function PeekOverviewProperties(p
               clearIconClassName="h-3 w-3 hidden group-hover:inline text-primary"
             />
           </div>
+        </SidebarPropertyListItem>
+
+        <SidebarPropertyListItem icon={Repeat} label={t("recurrence.label")}>
+          <IssueRecurrenceProperty
+            workspaceSlug={workspaceSlug}
+            projectId={projectId}
+            issueId={issueId}
+            disabled={disabled || !!issue.archived_at}
+          />
         </SidebarPropertyListItem>
 
         {isEstimateEnabled && (

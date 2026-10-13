@@ -945,9 +945,17 @@ class IssueDetailSerializer(IssueSerializer):
     is_intake = serializers.BooleanField(read_only=True)
     type_id = serializers.UUIDField(read_only=True)
     is_epic = serializers.SerializerMethodField()
+    recurrence = serializers.SerializerMethodField()
 
     def get_is_epic(self, obj):
         return bool(obj.type_id and obj.type.is_epic)
+
+    def get_recurrence(self, obj):
+        # Aight fork: recurring stories
+        from .recurrence import IssueRecurrenceSerializer
+
+        rule = obj.recurrences.filter(is_active=True).first()
+        return IssueRecurrenceSerializer(rule).data if rule else None
 
     class Meta(IssueSerializer.Meta):
         fields = IssueSerializer.Meta.fields + [
@@ -956,6 +964,7 @@ class IssueDetailSerializer(IssueSerializer):
             "is_intake",
             "type_id",
             "is_epic",
+            "recurrence",
         ]
         read_only_fields = fields
 

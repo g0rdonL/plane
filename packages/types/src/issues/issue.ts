@@ -87,9 +87,26 @@ type IssueRelation = {
   sequence_id: number;
 };
 
+// Aight fork: recurring stories
+export type TIssueRecurrenceFrequency = "daily" | "weekdays" | "weekly" | "monthly";
+
+export type TIssueRecurrencePayload = {
+  frequency: TIssueRecurrenceFrequency;
+  weekdays?: number[];
+  day_of_month?: number | null;
+};
+
+export type TIssueRecurrence = TIssueRecurrencePayload & {
+  weekdays: number[];
+  day_of_month: number | null;
+  next_run_at: string;
+  is_active: boolean;
+};
+
 export type TIssue = TBaseIssue & {
   description_html?: string;
   is_subscribed?: boolean;
+  recurrence?: TIssueRecurrence | null;
   parent?: Partial<TBaseIssue>;
   issue_reactions?: TIssueReaction[];
   issue_attachments?: TIssueAttachment[];
