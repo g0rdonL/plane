@@ -151,6 +151,7 @@ from .issue.reaction import IssueReactionViewSet
 from .issue.sub_issue import SubIssuesEndpoint
 
 from .issue.subscriber import IssueSubscriberViewSet
+from .issue.recurrence import IssueRecurrenceEndpoint
 
 from .issue.version import IssueVersionEndpoint, WorkItemDescriptionVersionEndpoint
 

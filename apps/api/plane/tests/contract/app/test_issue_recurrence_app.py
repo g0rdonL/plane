@@ -237,3 +237,81 @@ class TestRecurrenceGenerator:
         assert run(FIRST) == 1
         assert copies(good).count() == 1
         assert not copies(broken).exists()
+
+
+@pytest.mark.contract
+class TestRecurrenceApi:
+    def url(self, workspace, project, issue):
+        return f"/api/workspaces/{workspace.slug}/projects/{project.id}/issues/{issue.id}/recurrence/"
+
+    @pytest.mark.django_db
+    def test_get_without_rule_is_404(self, session_client, workspace, project, template):
+        assert session_client.get(self.url(workspace, project, template)).status_code == status.HTTP_404_NOT_FOUND
+
+    @pytest.mark.django_db
+    def test_put_weekly_then_get(self, session_client, workspace, project, template, create_user):
+        response = session_client.put(
+            self.url(workspace, project, template), {"frequency": "weekly", "weekdays": [4, 0]}, format="json"
+        )
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert response.data["frequency"] == "weekly"
+        assert response.data["weekdays"] == [0, 4]
+        assert response.data["day_of_month"] is None
+        assert response.data["is_active"] is True
+        rule = IssueRecurrence.objects.get(issue=template)
+        assert rule.actor_id == create_user.id
+        assert rule.next_run_at > timezone.now()
+        assert session_client.get(self.url(workspace, project, template)).data["frequency"] == "weekly"
+
+    @pytest.mark.django_db
+    def test_put_replaces_existing_rule(self, session_client, workspace, project, template):
+        url = self.url(workspace, project, template)
+        session_client.put(url, {"frequency": "daily"}, format="json")
+        response = session_client.put(url, {"frequency": "monthly", "day_of_month": 31}, format="json")
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert IssueRecurrence.objects.filter(issue=template).count() == 1
+        assert IssueRecurrence.objects.get(issue=template).day_of_month == 31
+
+    @pytest.mark.django_db
+    def test_delete_then_set_again(self, session_client, workspace, project, template):
+        url = self.url(workspace, project, template)
+        session_client.put(url, {"frequency": "daily"}, format="json")
+        assert session_client.delete(url).status_code == status.HTTP_204_NO_CONTENT
+        assert session_client.get(url).status_code == status.HTTP_404_NOT_FOUND
+        assert session_client.put(url, {"frequency": "weekdays"}, format="json").status_code == status.HTTP_200_OK
+
+    @pytest.mark.django_db
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"frequency": "hourly"},
+            {"frequency": "weekly"},
+            {"frequency": "weekly", "weekdays": []},
+            {"frequency": "weekly", "weekdays": [7]},
+            {"frequency": "monthly"},
+            {"frequency": "monthly", "day_of_month": 0},
+            {"frequency": "monthly", "day_of_month": 32},
+            {"frequency": "daily", "weekdays": [1]},
+            {"frequency": "weekdays", "day_of_month": 3},
+        ],
+    )
+    def test_invalid_bodies_are_400(self, session_client, workspace, project, template, body):
+        response = session_client.put(self.url(workspace, project, template), body, format="json")
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert not IssueRecurrence.objects.filter(issue=template).exists()
+
+    @pytest.mark.django_db
+    def test_guest_cannot_set(self, api_client, workspace, project, template):
+        guest = User.objects.create(email="guest@plane.so", username="guest")
+        WorkspaceMember.objects.create(workspace=workspace, member=guest, role=5)
+        ProjectMember.objects.create(project=project, member=guest, role=5, is_active=True)
+        api_client.force_authenticate(user=guest)
+        response = api_client.put(self.url(workspace, project, template), {"frequency": "daily"}, format="json")
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    @pytest.mark.django_db
+    def test_issue_detail_includes_recurrence(self, session_client, workspace, project, template):
+        detail = f"/api/workspaces/{workspace.slug}/projects/{project.id}/issues/{template.id}/"
+        assert session_client.get(detail).data["recurrence"] is None
+        session_client.put(self.url(workspace, project, template), {"frequency": "daily"}, format="json")
+        assert session_client.get(detail).data["recurrence"]["frequency"] == "daily"
