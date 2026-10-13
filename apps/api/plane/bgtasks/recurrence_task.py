@@ -46,7 +46,8 @@ def copy_creator(rule, template):
         project_id=rule.project_id, member_id=rule.actor_id, is_active=True, role__gte=15
     ).exists():
         return rule.actor_id
-    return template.created_by_id
+    # last resort so the copy and its activity always have an author
+    return template.created_by_id or template.project.workspace.owner_id
 
 
 def create_copy(rule, occurrence_date):
@@ -99,16 +100,19 @@ def create_copy(rule, occurrence_date):
         **common,
     ).save(disable_auto_set_user=True)
 
-    issue_activity.delay(
-        type="issue.activity.created",
-        requested_data=json.dumps({"name": copy.name, "assignee_ids": [str(assignee_id)] if assignee_id else []}),
-        actor_id=str(creator_id),
-        issue_id=str(copy.id),
-        project_id=str(project.id),
-        current_instance=None,
-        epoch=int(timezone.now().timestamp()),
-        notification=True,
-        origin=settings.WEB_URL,
+    # queue only after commit: the worker must be able to see the copy, and a rollback must not leave a task behind
+    transaction.on_commit(
+        lambda: issue_activity.delay(
+            type="issue.activity.created",
+            requested_data=json.dumps({"name": copy.name, "assignee_ids": [str(assignee_id)] if assignee_id else []}),
+            actor_id=str(creator_id),
+            issue_id=str(copy.id),
+            project_id=str(project.id),
+            current_instance=None,
+            epoch=int(timezone.now().timestamp()),
+            notification=True,
+            origin=settings.WEB_URL,
+        )
     )
     return copy
 
@@ -121,8 +125,9 @@ def run_rule(rule_id, now):
     """Create the due copy for one rule. Returns 1 if a copy was created, else 0."""
     with transaction.atomic():
         rule = (
-            IssueRecurrence.objects.select_for_update(skip_locked=True)
-            .select_related("issue", "project")
+            # of=("self",): lock only the rule row, not the joined project row a user may be editing
+            IssueRecurrence.objects.select_for_update(skip_locked=True, of=("self",))
+            .select_related("project")
             .filter(pk=rule_id, is_active=True, next_run_at__lte=now)
             .first()
         )

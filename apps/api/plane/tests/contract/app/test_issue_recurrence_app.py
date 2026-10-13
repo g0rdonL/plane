@@ -315,3 +315,55 @@ class TestRecurrenceApi:
         assert session_client.get(detail).data["recurrence"] is None
         session_client.put(self.url(workspace, project, template), {"frequency": "daily"}, format="json")
         assert session_client.get(detail).data["recurrence"]["frequency"] == "daily"
+
+
+@pytest.mark.contract
+class TestRecurrenceGeneratorReviewFixes:
+    @pytest.mark.django_db
+    def test_activity_is_queued_only_after_commit(self, template, create_user, mocker, django_capture_on_commit_callbacks):
+        delay = mocker.patch("plane.bgtasks.recurrence_task.issue_activity.delay")
+        make_rule(template, create_user, FIRST)
+        with django_capture_on_commit_callbacks(execute=False) as callbacks:
+            run(FIRST)
+            assert delay.call_count == 0  # nothing reaches the broker before the copy is committed
+        for callback in callbacks:
+            callback()
+        assert delay.call_count == 1
+
+    @pytest.mark.django_db
+    def test_no_creator_anywhere_falls_back_to_workspace_owner(self, template, create_user, teammate, project, workspace):
+        Issue.all_objects.filter(pk=template.pk).update(created_by=None)
+        rule = make_rule(template, teammate, FIRST)
+        ProjectMember.objects.filter(project=project, member=teammate).update(is_active=False)
+        run(FIRST)
+        assert copies(rule).get().created_by_id == workspace.owner_id
+
+
+@pytest.mark.contract
+class TestRecurrenceLocking:
+    @pytest.mark.django_db(transaction=True)
+    def test_rule_runs_while_template_row_is_locked(self, template, create_user):
+        import threading
+
+        from django.db import connection
+
+        rule = make_rule(template, create_user, FIRST)
+        locked, release = threading.Event(), threading.Event()
+
+        def hold_template_lock():
+            # another request editing the template holds its row lock across the 08:00 tick
+            with transaction.atomic():
+                list(Issue.objects.select_for_update().filter(pk=template.pk))
+                locked.set()
+                release.wait(10)
+            connection.close()
+
+        holder = threading.Thread(target=hold_template_lock)
+        holder.start()
+        locked.wait(10)
+        try:
+            assert run(FIRST) == 1
+        finally:
+            release.set()
+            holder.join()
+        assert copies(rule).count() == 1
