@@ -88,10 +88,10 @@ One failing rule is logged and skipped; it does not stop the others.
 ### The copy
 
 Copied from the template: `name`, `description_html` (+ `description_json`/`description_binary`/`description_stripped`),
-`priority`, `estimate_point`, `parent`, `type` (if set), labels, the assignee (single — see #16), modules.
+`priority`, `estimate_point`, `parent`, `type`, labels, the assignee (single — see #16), modules.
 
 Not copied: state (→ Todo, see Decisions), `start_date`, `target_date` (→ occurrence date), cycle, sub-issues,
-attachments, links, comments, reactions, subscribers beyond the defaults, `sort_order` (new default).
+attachments, links, comments, reactions, subscribers (the creator and assignee get the usual auto-subscription), `sort_order` (new default).
 
 `created_by` = rule `actor` (falls back to the template's `created_by` if the actor left the project). The copy goes
 through the same post-create path as a normal API create: `issue_activity.delay(type="issue.activity.created", …,
