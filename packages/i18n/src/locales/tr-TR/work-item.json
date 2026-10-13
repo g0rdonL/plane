@@ -422,5 +422,27 @@
       "label": "Epik Başlığı",
       "required": "Epik başlığı gereklidir."
     }
+  },
+  "recurrence": {
+    "label": "Repeats",
+    "none": "Doesn't repeat",
+    "daily": "Daily",
+    "weekdays": "Weekdays",
+    "weekly": "Weekly",
+    "monthly": "Monthly",
+    "weekly_on": "Weekly on {days}",
+    "monthly_on": "Monthly on day {day}",
+    "day_of_month": "Day of month",
+    "next": "Next: {date}",
+    "days": {
+      "0": "Mon",
+      "1": "Tue",
+      "2": "Wed",
+      "3": "Thu",
+      "4": "Fri",
+      "5": "Sat",
+      "6": "Sun"
+    },
+    "update_error": "Couldn't update the repeat. Try again."
   }
 }
