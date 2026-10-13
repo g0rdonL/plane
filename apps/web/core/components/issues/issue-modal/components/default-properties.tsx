@@ -20,7 +20,7 @@ import { getDate, renderFormattedPayloadDate, getTabIndex } from "@plane/utils";
 import { CycleDropdown } from "@/components/dropdowns/cycle";
 import { DateDropdown } from "@/components/dropdowns/date";
 import { EstimateDropdown } from "@/components/dropdowns/estimate";
-import { MemberDropdown } from "@/components/dropdowns/member/dropdown";
+import { AssigneeDropdown } from "@/components/dropdowns/member/assignee";
 import { ModuleDropdown } from "@/components/dropdowns/module/dropdown";
 import { PriorityDropdown } from "@/components/dropdowns/priority";
 import { StateDropdown } from "@/components/dropdowns/state/dropdown";
@@ -126,7 +126,7 @@ export const IssueDefaultProperties = observer(function IssueDefaultProperties(p
         name="assignee_ids"
         render={({ field: { value, onChange } }) => (
           <div className="h-7">
-            <MemberDropdown
+            <AssigneeDropdown
               projectId={projectId ?? undefined}
               value={value}
               onChange={(assigneeIds) => {
@@ -136,7 +136,6 @@ export const IssueDefaultProperties = observer(function IssueDefaultProperties(p
               buttonVariant={value?.length > 0 ? "transparent-without-text" : "border-with-text"}
               buttonClassName={value?.length > 0 ? "hover:bg-transparent" : ""}
               placeholder={t("assignees")}
-              multiple
               tabIndex={getIndex("assignee_ids")}
             />
           </div>

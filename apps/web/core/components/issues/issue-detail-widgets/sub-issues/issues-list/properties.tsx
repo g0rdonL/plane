@@ -1,3 +1,6 @@
+// oxlint-disable unicorn/consistent-function-scoping
+// oxlint-disable jsx_a11y/click-events-have-key-events
+// oxlint-disable jsx_a11y/no-static-element-interactions
 /**
  * Copyright (c) 2023-present Plane Software, Inc. and contributors
  * SPDX-License-Identifier: AGPL-3.0-only
@@ -15,7 +18,7 @@ import { getDate, renderFormattedPayloadDate, shouldHighlightIssueDueDate } from
 // components
 import { DateDropdown } from "@/components/dropdowns/date";
 import { DateRangeDropdown } from "@/components/dropdowns/date-range";
-import { MemberDropdown } from "@/components/dropdowns/member/dropdown";
+import { AssigneeDropdown } from "@/components/dropdowns/member/assignee";
 import { PriorityDropdown } from "@/components/dropdowns/priority";
 import { StateDropdown } from "@/components/dropdowns/state/dropdown";
 // hooks
@@ -206,7 +209,7 @@ export const SubIssuesListItemProperties = observer(function SubIssuesListItemPr
 
       <WithDisplayPropertiesHOC displayProperties={displayProperties} displayPropertyKey="assignee">
         <div className="h-5 flex-shrink-0">
-          <MemberDropdown
+          <AssigneeDropdown
             value={issue.assignee_ids}
             projectId={issue.project_id ?? undefined}
             onChange={(val) =>
@@ -216,7 +219,6 @@ export const SubIssuesListItemProperties = observer(function SubIssuesListItemPr
               })
             }
             disabled={!canEdit}
-            multiple
             buttonVariant={(issue?.assignee_ids || []).length > 0 ? "transparent-without-text" : "border-without-text"}
             buttonClassName={(issue?.assignee_ids || []).length > 0 ? "hover:bg-transparent px-0" : ""}
           />
