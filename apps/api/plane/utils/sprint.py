@@ -136,3 +136,81 @@ def apply_sprint_defaults(issue_ids, project_id, actor_id, origin=None):
             origin=origin,
         )
     return {str(issue_id): requested for issue_id, (requested, _) in changes.items()}
+
+
+# Aight fork: a story moved to Done joins the current sprint. Work picked up outside a sprint
+# (Paseo workspaces) or from an older or later sprint then counts in the week it was finished.
+def current_sprint_cycle(project_id):
+    """The project's cycle running right now, latest start first; None if there isn't one."""
+    from plane.db.models import Cycle
+
+    now = timezone.now()
+    return (
+        Cycle.objects.filter(project_id=project_id, start_date__lte=now, end_date__gte=now, archived_at__isnull=True)
+        .order_by("-start_date")
+        .first()
+    )
+
+
+def completed_state_change(requested_data, current_instance, project_id):
+    """True if an issue update moved the issue from a non-completed state into a completed one."""
+    import json
+
+    from plane.db.models import State
+
+    requested = json.loads(requested_data) if isinstance(requested_data, str) else requested_data or {}
+    current = json.loads(current_instance) if isinstance(current_instance, str) else current_instance or {}
+    new_id = requested.get("state_id") or requested.get("state")
+    old_id = current.get("state_id") or current.get("state")
+    if not new_id or str(new_id) == str(old_id):
+        return False
+    groups = dict(
+        State.objects.filter(project_id=project_id, pk__in=[i for i in (new_id, old_id) if i]).values_list(
+            "id", "group"
+        )
+    )
+    groups = {str(k): v for k, v in groups.items()}
+    return groups.get(str(new_id)) == "completed" and groups.get(str(old_id)) != "completed"
+
+
+def join_current_sprint(issue_id, project_id, actor_id):
+    """Move a completed story into the project's current sprint unless it's already in this week's.
+
+    Returns the cycle activity payload ({"updated_cycle_issues", "created_cycle_issues"}) or None.
+    """
+    from django.core import serializers
+
+    from plane.db.models import CycleIssue, Issue
+
+    issue = (
+        Issue.issue_objects.filter(pk=issue_id, project_id=project_id, state__group="completed")
+        .exclude(type__is_epic=True)
+        .first()
+    )
+    if issue is None or Issue.objects.filter(sprint_issue_q(["current"]), pk=issue_id).exists():
+        return None
+    cycle = current_sprint_cycle(project_id)
+    if cycle is None:
+        return None
+
+    cycle_issue = CycleIssue.objects.filter(issue_id=issue_id, project_id=project_id).first()
+    if cycle_issue is not None:
+        old_cycle_id = cycle_issue.cycle_id
+        cycle_issue.cycle_id = cycle.id
+        cycle_issue.updated_by_id = actor_id
+        cycle_issue.save(update_fields=["cycle_id", "updated_by_id", "updated_at"])
+        return {
+            "updated_cycle_issues": [
+                {"old_cycle_id": str(old_cycle_id), "new_cycle_id": str(cycle.id), "issue_id": str(issue_id)}
+            ],
+            "created_cycle_issues": "[]",
+        }
+    cycle_issue = CycleIssue.objects.create(
+        cycle=cycle,
+        issue_id=issue_id,
+        project_id=project_id,
+        workspace_id=cycle.workspace_id,
+        created_by_id=actor_id,
+        updated_by_id=actor_id,
+    )
+    return {"updated_cycle_issues": [], "created_cycle_issues": serializers.serialize("json", [cycle_issue])}

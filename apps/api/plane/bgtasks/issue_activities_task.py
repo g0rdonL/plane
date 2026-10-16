@@ -35,6 +35,7 @@ from plane.db.models import (
 from plane.settings.redis import redis_instance
 from plane.utils.exception_logger import log_exception
 from plane.utils.issue_relation_mapper import get_inverse_relation
+from plane.utils.sprint import completed_state_change, join_current_sprint
 from plane.utils.uuid import is_valid_uuid
 
 
@@ -1608,6 +1609,25 @@ def issue_activity(
                 issue_activities=issue_activities,
                 epoch=epoch,
             )
+
+        # Aight fork: a story moved to Done joins the current sprint
+        if type == "issue.activity.updated" and issue_id is not None:
+            try:
+                if completed_state_change(requested_data, current_instance, project_id):
+                    moved = join_current_sprint(issue_id, project_id, actor_id)
+                    if moved:
+                        create_cycle_issue_activity(
+                            requested_data=None,
+                            current_instance=json.dumps(moved),
+                            issue_id=issue_id,
+                            project_id=project_id,
+                            workspace_id=workspace_id,
+                            actor_id=actor_id,
+                            issue_activities=issue_activities,
+                            epoch=epoch,
+                        )
+            except Exception as e:
+                log_exception(e)
 
         # Save all the values to database
         issue_activities_created = IssueActivity.objects.bulk_create(issue_activities)
