@@ -305,10 +305,15 @@ class AdvanceAnalyticsBaseView(BaseAPIView):
             carryover_counts,
         )
 
-    def _completed_cycle_lead_times(
+    def _completed_story_times(
         self, window_start: dt.datetime, window_end: dt.datetime
-    ) -> Tuple[List[float], List[float]]:
-        """Cycle and lead times (in days) for stories completed inside the window."""
+    ) -> List[Tuple[Any, dt.datetime, dt.datetime, dt.datetime, Any]]:
+        """Stories completed inside the window with their started_at and estimate value.
+
+        Returns (issue_id, created_at, completed_at, started_at, estimate_value) rows. The
+        single IssueActivity query is shared by the cycle/lead-time tiles and the estimate
+        accuracy chart.
+        """
         base = Issue.issue_objects.filter(**self.filters["base_filters"]).filter(NON_EPIC_Q)
         completed = list(
             base.filter(
@@ -316,11 +321,11 @@ class AdvanceAnalyticsBaseView(BaseAPIView):
                 completed_at__gte=window_start,
                 completed_at__lt=window_end,
             )
-            .values_list("id", "created_at", "completed_at")
+            .values_list("id", "created_at", "completed_at", "estimate_point__value")
             .distinct()
         )
         if not completed:
-            return [], []
+            return []
 
         new_group = State.objects.filter(id=OuterRef("new_identifier")).values("group")[:1]
         started_rows = (
@@ -332,10 +337,21 @@ class AdvanceAnalyticsBaseView(BaseAPIView):
         )
         started_map = {row["issue_id"]: row["started_at"] for row in started_rows}
 
+        rows = []
+        for issue_id, created_at, completed_at, estimate_value in completed:
+            started_at = started_map.get(issue_id) or created_at
+            rows.append((issue_id, created_at, completed_at, started_at, estimate_value))
+        return rows
+
+    def _completed_cycle_lead_times(
+        self, window_start: dt.datetime, window_end: dt.datetime
+    ) -> Tuple[List[float], List[float]]:
+        """Cycle and lead times (in days) for stories completed inside the window."""
         cycle_times = []
         lead_times = []
-        for issue_id, created_at, completed_at in completed:
-            started_at = started_map.get(issue_id) or created_at
+        for _issue_id, created_at, completed_at, started_at, _estimate in self._completed_story_times(
+            window_start, window_end
+        ):
             cycle_times.append((completed_at - started_at).total_seconds() / 86400)
             lead_times.append((completed_at - created_at).total_seconds() / 86400)
         return cycle_times, lead_times
@@ -726,6 +742,62 @@ class AdvanceAnalyticsChartEndpoint(AdvanceAnalyticsBaseView):
         ]
         return {"data": data, "schema": {}}
 
+    def estimate_accuracy_chart(self, weeks: int) -> Dict[str, Any]:
+        """Cycle time for completed stories grouped by their estimate point value."""
+        windows = _week_windows(weeks)
+        rows = self._completed_story_times(windows[0][0], windows[-1][1])
+
+        groups: Dict[float, Dict[str, Any]] = {}
+        started_at_map: Dict[Any, dt.datetime] = {}
+        unestimated_count = 0
+        for issue_id, _created_at, completed_at, started_at, estimate_value in rows:
+            if estimate_value in (None, ""):
+                unestimated_count += 1
+                continue
+            value = _to_float(estimate_value)
+            group = groups.get(value)
+            if group is None:
+                group = groups[value] = {"value": estimate_value, "issue_ids": [], "cycle_times": []}
+            group["issue_ids"].append(issue_id)
+            group["cycle_times"].append((completed_at - started_at).total_seconds() / 86400)
+            started_at_map[issue_id] = started_at
+
+        reestimated_ids = self._reestimated_issue_ids(started_at_map)
+
+        data = []
+        for value in sorted(groups.keys()):
+            group = groups[value]
+            cycle_times = group["cycle_times"]
+            p85 = _percentile_85(cycle_times)
+            data.append(
+                {
+                    "key": group["value"],
+                    "name": f"{group['value']} pts",
+                    "count": len(cycle_times),
+                    "median_days": round(statistics.median(cycle_times), 1),
+                    "p85_days": None if p85 is None else round(p85, 1),
+                    "min_days": round(min(cycle_times), 1),
+                    "max_days": round(max(cycle_times), 1),
+                    "reestimated_count": sum(1 for issue_id in group["issue_ids"] if issue_id in reestimated_ids),
+                }
+            )
+        return {"data": data, "unestimated_count": unestimated_count, "schema": {}}
+
+    def _reestimated_issue_ids(self, started_at_map: Dict[Any, dt.datetime]) -> set:
+        """Issue ids with an estimate-change activity created after the story's started_at."""
+        if not started_at_map:
+            return set()
+        reestimated = set()
+        activities = IssueActivity.objects.filter(
+            field__startswith="estimate_",
+            issue_id__in=list(started_at_map.keys()),
+        ).values_list("issue_id", "created_at")
+        for issue_id, created_at in activities:
+            started_at = started_at_map.get(issue_id)
+            if started_at is not None and created_at > started_at:
+                reestimated.add(issue_id)
+        return reestimated
+
     def cumulative_flow_chart(self, days: int) -> Dict[str, Any]:
         today = timezone.now().astimezone(SPRINT_TZ).date()
         day_list = [today - dt.timedelta(days=days - 1 - offset) for offset in range(days)]
@@ -845,6 +917,12 @@ class AdvanceAnalyticsChartEndpoint(AdvanceAnalyticsBaseView):
             if weeks is None:
                 return Response({"message": "Invalid weeks"}, status=status.HTTP_400_BAD_REQUEST)
             return Response(self.cycle_time_chart(weeks), status=status.HTTP_200_OK)
+
+        elif type == "estimate-accuracy":
+            weeks = _parse_range(request.GET.get("weeks"), 8, 26)
+            if weeks is None:
+                return Response({"message": "Invalid weeks"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(self.estimate_accuracy_chart(weeks), status=status.HTTP_200_OK)
 
         elif type == "cumulative-flow":
             days = _parse_range(request.GET.get("days"), 30, 90)

@@ -10,6 +10,7 @@ import TotalInsights from "../total-insights";
 import CarryoverChart from "./carryover-chart";
 import CumulativeFlowChart from "./cumulative-flow-chart";
 import CycleTimeChart from "./cycle-time-chart";
+import EstimateAccuracyChart from "./estimate-accuracy-chart";
 import ThroughputChart from "./throughput-chart";
 import VelocityChart from "./velocity-chart";
 
@@ -22,6 +23,7 @@ function Momentum() {
         <CarryoverChart />
         <ThroughputChart />
         <CycleTimeChart />
+        <EstimateAccuracyChart />
         <CumulativeFlowChart />
       </div>
     </AnalyticsWrapper>

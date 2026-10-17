@@ -46,6 +46,7 @@ export type TAnalyticsGraphsBase =
   | "carryover"
   | "throughput"
   | "cycle-time"
+  | "estimate-accuracy"
   | "cumulative-flow";
 export interface AnalyticsTab {
   key: TAnalyticsTabsBase;

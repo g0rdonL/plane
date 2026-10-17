@@ -125,6 +125,14 @@ def add_cycle_activity(project, issue, verb, occurred_at, user, old_cycle=None, 
     return activity
 
 
+def add_estimate_activity(project, issue, occurred_at, user, field="estimate_points"):
+    activity = IssueActivity.objects.create(
+        issue=issue, project=project, workspace=project.workspace, verb="updated", field=field, actor=user,
+    )
+    IssueActivity.objects.filter(pk=activity.pk).update(created_at=occurred_at)
+    return activity
+
+
 def momentum_url(workspace):
     return f"/api/workspaces/{workspace.slug}/advance-analytics/"
 
@@ -287,6 +295,75 @@ class TestMomentumAnalytics:
         assert response.status_code == status.HTTP_200_OK, response.data
         assert response.data["median_cycle_time"]["count"] == 5.0
         assert response.data["median_lead_time"]["count"] == 5.0
+
+    @pytest.mark.django_db
+    def test_estimate_accuracy_groups_by_points(self, session_client, workspace, create_user):
+        project, states, points = make_project(workspace, create_user)
+        this_start, _ = week_bounds(0)
+        completed_at = this_start + dt.timedelta(hours=6)
+
+        def completed_story(point, cycle_days, started=True):
+            story = make_story(
+                project, create_user, states["done"], point,
+                created_at=completed_at - dt.timedelta(days=cycle_days),
+                completed_at=completed_at,
+            )
+            if started:
+                add_state_activity(
+                    project, story, states["progress"], states["backlog"],
+                    completed_at - dt.timedelta(days=cycle_days), create_user,
+                )
+            return story
+
+        # 1 point: cycles 1.0 and 2.0
+        story_a = completed_story(points["1"], 1.0)
+        completed_story(points["1"], 2.0)
+        # 2 points: cycle 4.0, re-estimated after it started
+        story_c = completed_story(points["2"], 4.0)
+        add_estimate_activity(project, story_c, completed_at - dt.timedelta(days=2), create_user)
+        # 4 points: cycles 6.0, 8.0 and 10.0 (fallback to created_at, no started transition)
+        completed_story(points["4"], 6.0)
+        completed_story(points["4"], 8.0)
+        completed_story(points["4"], 10.0, started=False)
+        # estimate changed BEFORE the story started: must not count as re-estimated
+        add_estimate_activity(project, story_a, completed_at - dt.timedelta(days=3), create_user)
+        # no estimate: counted separately, never grouped
+        make_story(project, create_user, states["done"], completed_at=completed_at)
+        # an epic with points is excluded entirely
+        make_story(project, create_user, states["done"], points["8"], completed_at=completed_at, epic=True)
+
+        response = session_client.get(charts_url(workspace), {"type": "estimate-accuracy", "weeks": 2})
+        assert response.status_code == status.HTTP_200_OK, response.data
+        data = response.data["data"]
+        assert [row["key"] for row in data] == ["1", "2", "4"]
+        assert response.data["unestimated_count"] == 1
+
+        by_key = {row["key"]: row for row in data}
+        assert by_key["1"]["count"] == 2
+        assert by_key["1"]["median_days"] == 1.5
+        assert by_key["1"]["p85_days"] == round(statistics.quantiles([1.0, 2.0], n=20)[16], 1)
+        assert by_key["1"]["min_days"] == 1.0
+        assert by_key["1"]["max_days"] == 2.0
+        assert by_key["1"]["reestimated_count"] == 0
+        assert by_key["1"]["name"] == "1 pts"
+
+        assert by_key["2"]["count"] == 1
+        assert by_key["2"]["median_days"] == 4.0
+        assert by_key["2"]["p85_days"] == 4.0
+        assert by_key["2"]["reestimated_count"] == 1
+
+        assert by_key["4"]["count"] == 3
+        assert by_key["4"]["median_days"] == 8.0
+        assert by_key["4"]["p85_days"] == round(statistics.quantiles([6.0, 8.0, 10.0], n=20)[16], 1)
+        assert by_key["4"]["min_days"] == 6.0
+        assert by_key["4"]["max_days"] == 10.0
+
+    @pytest.mark.django_db
+    def test_estimate_accuracy_invalid_weeks(self, session_client, workspace, create_user):
+        make_project(workspace, create_user)
+        assert session_client.get(
+            charts_url(workspace), {"type": "estimate-accuracy", "weeks": 99}
+        ).status_code == status.HTTP_400_BAD_REQUEST
 
     @pytest.mark.django_db
     def test_cumulative_flow_buckets_and_cancellation(self, session_client, workspace, create_user):
@@ -493,10 +570,43 @@ class TestMomentumAnalytics:
         assert response.status_code == status.HTTP_200_OK, response.data
         assert "carryover_rate" in response.data
 
-        chart = session_client.get(charts_url(workspace), {"type": "carryover", "weeks": 3})
+        # weeks=3 → the two elapsed weeks (0% and 50%) are averaged; the running week is left out
+        assert response.data["carryover_rate"]["count"] == 25.0
+
+    @pytest.mark.django_db
+    def test_carryover_zero_while_sprint_is_running(self, session_client, workspace, create_user):
+        project, states, points = make_project(workspace, create_user)
+        this_week = make_cycle(project, create_user, 0)
+        this_start, _ = week_bounds(0)
+        make_story(project, create_user, states["todo"], points["4"], cycle=this_week)
+
+        chart = session_client.get(charts_url(workspace), {"type": "carryover", "weeks": 2})
         assert chart.status_code == status.HTTP_200_OK, chart.data
-        rates = [row["carryover_rate"] for row in chart.data["data"]][-3:]
-        assert response.data["carryover_rate"]["count"] == round(sum(rates) / len(rates), 1)
+        row = {r["key"]: r for r in chart.data["data"]}[week_key(this_start)]
+        assert (row["committed_points"], row["carryover_points"], row["carryover_count"]) == (4.0, 0.0, 0)
+
+    @pytest.mark.django_db
+    def test_carryover_respects_assignee_filter(self, session_client, workspace, create_user):
+        project, states, points = make_project(workspace, create_user)
+        teammate = make_teammate(workspace, project)
+        last_week = make_cycle(project, create_user, -1)
+        last_start, _ = week_bounds(-1)
+        mine = make_story(project, create_user, states["todo"], points["4"], cycle=last_week)
+        theirs = make_story(project, create_user, states["todo"], points["2"], cycle=last_week)
+        assign_story(mine, create_user)
+        assign_story(theirs, teammate)
+
+        chart = session_client.get(
+            charts_url(workspace), {"type": "carryover", "weeks": 2, "assignee_ids": str(teammate.id)}
+        )
+        assert chart.status_code == status.HTTP_200_OK, chart.data
+        row = {r["key"]: r for r in chart.data["data"]}[week_key(last_start)]
+        assert (row["committed_points"], row["carryover_points"], row["carryover_count"]) == (2.0, 2.0, 1)
+
+        tiles = session_client.get(
+            momentum_url(workspace), {"tab": "momentum", "weeks": 3, "assignee_ids": str(teammate.id)}
+        )
+        assert tiles.status_code == status.HTTP_200_OK, tiles.data
 
     def test_requires_login(self, api_client, workspace):
         assert api_client.get(momentum_url(workspace), {"tab": "momentum"}).status_code in (
