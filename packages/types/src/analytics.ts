@@ -45,6 +45,7 @@ export type TAnalyticsGraphsBase =
   | "velocity"
   | "throughput"
   | "cycle-time"
+  | "estimate-accuracy"
   | "cumulative-flow";
 export interface AnalyticsTab {
   key: TAnalyticsTabsBase;
