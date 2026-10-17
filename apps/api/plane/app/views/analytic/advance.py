@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # See the LICENSE file for details.
 
+import bisect
 import datetime as dt
 import statistics
+import uuid
 from rest_framework.response import Response
 from rest_framework import status
 from typing import Dict, List, Any, Optional, Tuple
@@ -110,80 +112,220 @@ def _percentile_85(values: List[float]) -> Optional[float]:
     return statistics.quantiles(values, n=20)[16]
 
 
+def _membership_at_close(
+    activities: List[Tuple[dt.datetime, str, Any, Any]],
+    times: List[dt.datetime],
+    end_date: dt.datetime,
+    cycle_id: Any,
+) -> Optional[bool]:
+    """Whether an issue was in `cycle_id` at `end_date`, replaying its ordered `cycles` activities.
+
+    Membership is the cycle set by the last activity at or before T (`created`/`updated` set the new
+    cycle, `deleted` removes it). With no activity at/before T, a pre-history `updated`/`deleted`
+    whose old cycle is `cycle_id` counts. Returns None when there are no cycle activities at all, so
+    the caller can fall back to the current CycleIssue row.
+    """
+    index = bisect.bisect_right(times, end_date) - 1
+    if index >= 0:
+        _created_at, verb, _old_id, new_id = activities[index]
+        return (None if verb == "deleted" else new_id) == cycle_id
+    if activities:
+        _created_at, verb, old_id, _new_id = activities[0]
+        return verb in ("updated", "deleted") and old_id == cycle_id
+    return None
+
+
 class AdvanceAnalyticsBaseView(BaseAPIView):
     def initialize_workspace(self, slug: str, type: str) -> None:
         self._workspace_slug = slug
+        assignee_ids = self.request.GET.get("assignee_ids", None)
+        self._invalid_assignee_ids = self._has_invalid_assignee_ids(assignee_ids)
         self.filters = get_analytics_filters(
             slug=slug,
             type=type,
             user=self.request.user,
             date_filter=self.request.GET.get("date_filter", None),
             project_ids=self.request.GET.get("project_ids", None),
+            assignee_ids=assignee_ids,
         )
 
-    def _velocity_series(self, weeks: int) -> Tuple[List[Any], List[float], List[float], List[int]]:
-        """Committed/completed points and completed story counts per sprint week (oldest first)."""
+    @staticmethod
+    def _has_invalid_assignee_ids(assignee_ids: Optional[str]) -> bool:
+        """A comma-separated assignee id list is only valid if every id parses as a UUID."""
+        if not assignee_ids:
+            return False
+        for raw_id in str(assignee_ids).split(","):
+            if not raw_id:
+                continue
+            try:
+                uuid.UUID(raw_id)
+            except (ValueError, TypeError, AttributeError):
+                return True
+        return False
+
+    def _committed_carryover(
+        self, windows: List[Tuple[dt.datetime, dt.datetime]]
+    ) -> Tuple[List[float], List[float], List[int]]:
+        """Committed and carried-over points and carryover story counts per sprint week.
+
+        "Committed" is the scope of each cycle at its close (end_date), not the current CycleIssue
+        rows: a story carried over has its CycleIssue row overwritten in place, so membership is
+        replayed from the historical `cycles` IssueActivity rows.
+        """
+        weeks = len(windows)
+        window_start, window_end = windows[0][0], windows[-1][1]
+        # Cycles carry no assignee; only the workspace/project scoping applies to them.
+        cycle_filters = {
+            key: value for key, value in self.filters["base_filters"].items() if not key.startswith("issue_assignee__")
+        }
+        cycles = list(
+            Cycle.objects.filter(**cycle_filters)
+            .filter(deleted_at__isnull=True, end_date__gte=window_start, end_date__lt=window_end)
+            .values_list("id", "end_date")
+        )
+
+        committed_points = [0.0] * weeks
+        committed_seen = [set() for _ in range(weeks)]
+        carryover_points = [0.0] * weeks
+        carryover_seen = [set() for _ in range(weeks)]
+        carryover_counts = [0] * weeks
+        if not cycles:
+            return committed_points, carryover_points, carryover_counts
+
+        cycle_ids = [cycle_id for cycle_id, _end in cycles]
+
+        current_cycles: Dict[Any, set] = {}
+        for issue_id, cycle_id in CycleIssue.objects.filter(
+            cycle_id__in=cycle_ids, deleted_at__isnull=True
+        ).values_list("issue_id", "cycle_id"):
+            current_cycles.setdefault(issue_id, set()).add(cycle_id)
+
+        referencing_ids = set(
+            IssueActivity.objects.filter(field="cycles", workspace__slug=self._workspace_slug)
+            .filter(Q(old_identifier__in=cycle_ids) | Q(new_identifier__in=cycle_ids))
+            .values_list("issue_id", flat=True)
+        )
+        candidate_ids = (set(current_cycles) | referencing_ids) - {None}
+
+        activity_map: Dict[Any, List[Tuple[dt.datetime, str, Any, Any]]] = {}
+        if candidate_ids:
+            rows = (
+                IssueActivity.objects.filter(field="cycles", issue_id__in=candidate_ids)
+                .order_by("issue_id", "created_at")
+                .values_list("issue_id", "created_at", "verb", "old_identifier", "new_identifier")
+            )
+            for issue_id, created_at, verb, old_id, new_id in rows:
+                activity_map.setdefault(issue_id, []).append((created_at, verb, old_id, new_id))
+
+        scope: Dict[Any, set] = {cycle_id: set() for cycle_id in cycle_ids}
+        for issue_id in candidate_ids:
+            activities = activity_map.get(issue_id, [])
+            times = [row[0] for row in activities]
+            for cycle_id, end_date in cycles:
+                in_scope = _membership_at_close(activities, times, end_date, cycle_id)
+                if in_scope is None:
+                    in_scope = cycle_id in current_cycles.get(issue_id, set())
+                if in_scope:
+                    scope[cycle_id].add(issue_id)
+
+        scope_ids = set().union(*scope.values()) if scope else set()
+        estimates: Dict[Any, Tuple[float, Optional[dt.datetime], str]] = {}
+        if scope_ids:
+            rows = (
+                Issue.issue_objects.filter(**self.filters["base_filters"])
+                .filter(NON_EPIC_Q)
+                .filter(id__in=scope_ids)
+                .exclude(state__group="cancelled")
+                .values_list("id", "estimate_point__value", "completed_at", "state__group")
+            )
+            for issue_id, value, completed_at, group in rows:
+                estimates[issue_id] = (_to_float(value), completed_at, group)
+
+        now = timezone.now()
+        for cycle_id, end_date in cycles:
+            index = _week_index(end_date, windows)
+            if index is None:
+                continue
+            # A sprint still running has nothing carried over yet.
+            closed = end_date <= now
+            for issue_id in scope[cycle_id]:
+                estimate = estimates.get(issue_id)
+                if estimate is None:
+                    continue
+                value, completed_at, group = estimate
+                if issue_id not in committed_seen[index]:
+                    committed_seen[index].add(issue_id)
+                    committed_points[index] += value
+                completed = completed_at is not None and completed_at <= end_date and group == "completed"
+                if closed and not completed and issue_id not in carryover_seen[index]:
+                    carryover_seen[index].add(issue_id)
+                    carryover_points[index] += value
+            carryover_counts[index] = len(carryover_seen[index])
+
+        return committed_points, carryover_points, carryover_counts
+
+    def _velocity_series(
+        self, weeks: int
+    ) -> Tuple[List[Any], List[float], List[float], List[int], List[float], List[int]]:
+        """Committed/completed/carryover points and story counts per sprint week (oldest first)."""
         windows = _week_windows(weeks)
         window_start, window_end = windows[0][0], windows[-1][1]
         base = Issue.issue_objects.filter(**self.filters["base_filters"]).filter(NON_EPIC_Q)
 
-        committed_points = [0.0] * weeks
-        seen_committed = [set() for _ in range(weeks)]
-        committed_rows = (
-            CycleIssue.objects.filter(
-                deleted_at__isnull=True,
-                cycle__deleted_at__isnull=True,
-                cycle__end_date__gte=window_start,
-                cycle__end_date__lt=window_end,
-                issue__deleted_at__isnull=True,
-                issue__archived_at__isnull=True,
-                issue__is_draft=False,
-            )
-            .filter(Q(issue__type__is_epic=False) | Q(issue__type__isnull=True))
-            .exclude(issue__state__group="cancelled")
-            .exclude(issue__state__group="triage")
-        )
-        for key, value in self.filters["base_filters"].items():
-            committed_rows = committed_rows.filter(**{f"issue__{key}": value})
-        for issue_id, end_date, value in committed_rows.values_list(
-            "issue_id", "cycle__end_date", "issue__estimate_point__value"
-        ):
-            index = _week_index(end_date, windows)
-            if index is None or issue_id in seen_committed[index]:
-                continue
-            seen_committed[index].add(issue_id)
-            committed_points[index] += _to_float(value)
+        committed_points, carryover_points, carryover_counts = self._committed_carryover(windows)
 
         completed_points = [0.0] * weeks
         completed_counts = [0] * weeks
-        completed_rows = base.filter(
-            state__group="completed",
-            completed_at__gte=window_start,
-            completed_at__lt=window_end,
-        ).values_list("completed_at", "estimate_point__value")
-        for completed_at, value in completed_rows:
+        completed_rows = (
+            base.filter(
+                state__group="completed",
+                completed_at__gte=window_start,
+                completed_at__lt=window_end,
+            )
+            .values_list("id", "completed_at", "estimate_point__value")
+            .distinct()
+        )
+        seen_completed = set()
+        for issue_id, completed_at, value in completed_rows:
+            if issue_id in seen_completed:
+                continue
+            seen_completed.add(issue_id)
             index = _week_index(completed_at, windows)
             if index is None:
                 continue
             completed_points[index] += _to_float(value)
             completed_counts[index] += 1
 
-        return windows, committed_points, completed_points, completed_counts
+        return (
+            windows,
+            committed_points,
+            completed_points,
+            completed_counts,
+            carryover_points,
+            carryover_counts,
+        )
 
-    def _completed_cycle_lead_times(
+    def _completed_story_times(
         self, window_start: dt.datetime, window_end: dt.datetime
-    ) -> Tuple[List[float], List[float]]:
-        """Cycle and lead times (in days) for stories completed inside the window."""
+    ) -> List[Tuple[Any, dt.datetime, dt.datetime, dt.datetime, Any]]:
+        """Stories completed inside the window with their started_at and estimate value.
+
+        Returns (issue_id, created_at, completed_at, started_at, estimate_value) rows. The
+        single IssueActivity query is shared by the cycle/lead-time tiles and the estimate
+        accuracy chart.
+        """
         base = Issue.issue_objects.filter(**self.filters["base_filters"]).filter(NON_EPIC_Q)
         completed = list(
             base.filter(
                 state__group="completed",
                 completed_at__gte=window_start,
                 completed_at__lt=window_end,
-            ).values_list("id", "created_at", "completed_at")
+            )
+            .values_list("id", "created_at", "completed_at", "estimate_point__value")
+            .distinct()
         )
         if not completed:
-            return [], []
+            return []
 
         new_group = State.objects.filter(id=OuterRef("new_identifier")).values("group")[:1]
         started_rows = (
@@ -195,10 +337,21 @@ class AdvanceAnalyticsBaseView(BaseAPIView):
         )
         started_map = {row["issue_id"]: row["started_at"] for row in started_rows}
 
+        rows = []
+        for issue_id, created_at, completed_at, estimate_value in completed:
+            started_at = started_map.get(issue_id) or created_at
+            rows.append((issue_id, created_at, completed_at, started_at, estimate_value))
+        return rows
+
+    def _completed_cycle_lead_times(
+        self, window_start: dt.datetime, window_end: dt.datetime
+    ) -> Tuple[List[float], List[float]]:
+        """Cycle and lead times (in days) for stories completed inside the window."""
         cycle_times = []
         lead_times = []
-        for issue_id, created_at, completed_at in completed:
-            started_at = started_map.get(issue_id) or created_at
+        for _issue_id, created_at, completed_at, started_at, _estimate in self._completed_story_times(
+            window_start, window_end
+        ):
             cycle_times.append((completed_at - started_at).total_seconds() / 86400)
             lead_times.append((completed_at - created_at).total_seconds() / 86400)
         return cycle_times, lead_times
@@ -266,13 +419,27 @@ class AdvanceAnalyticsEndpoint(AdvanceAnalyticsBaseView):
         }
 
     def get_momentum_data(self, weeks: int) -> Dict[str, Dict[str, Any]]:
-        windows, committed_points, completed_points, completed_counts = self._velocity_series(weeks)
+        (
+            windows,
+            committed_points,
+            completed_points,
+            completed_counts,
+            carryover_points,
+            _carryover_counts,
+        ) = self._velocity_series(weeks)
         elapsed_index = weeks - 2 if weeks >= 2 else weeks - 1
         last_three_points = completed_points[-3:]
         last_three_counts = completed_counts[-3:]
 
         cycle_times, lead_times = self._completed_cycle_lead_times(windows[0][0], windows[-1][1])
         committed_last = committed_points[elapsed_index]
+
+        carryover_rates = [
+            (carryover_points[index] / committed_points[index] * 100) if committed_points[index] > 0 else 0.0
+            for index in range(weeks)
+        ]
+        # The current week's sprint hasn't closed, so average the three most recent elapsed weeks.
+        last_three_rates = carryover_rates[max(0, elapsed_index - 2) : elapsed_index + 1]
 
         def tile(value: Optional[float]) -> Dict[str, Any]:
             return {"count": None if value is None else round(value, 1)}
@@ -284,6 +451,7 @@ class AdvanceAnalyticsEndpoint(AdvanceAnalyticsBaseView):
                 "count": round(completed_points[elapsed_index] / committed_last * 100) if committed_last > 0 else None
             },
             "avg_throughput": tile(sum(last_three_counts) / len(last_three_counts)),
+            "carryover_rate": tile(sum(last_three_rates) / len(last_three_rates)),
             "median_cycle_time": tile(statistics.median(cycle_times) if cycle_times else None),
             "p85_cycle_time": tile(_percentile_85(cycle_times)),
             "median_lead_time": tile(statistics.median(lead_times) if lead_times else None),
@@ -293,6 +461,8 @@ class AdvanceAnalyticsEndpoint(AdvanceAnalyticsBaseView):
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER], level="WORKSPACE")
     def get(self, request: HttpRequest, slug: str) -> Response:
         self.initialize_workspace(slug, type="analytics")
+        if self._invalid_assignee_ids:
+            return Response({"message": "Invalid assignee_ids"}, status=status.HTTP_400_BAD_REQUEST)
         tab = request.GET.get("tab", "overview")
 
         if tab == "overview":
@@ -355,6 +525,8 @@ class AdvanceAnalyticsStatsEndpoint(AdvanceAnalyticsBaseView):
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER], level="WORKSPACE")
     def get(self, request: HttpRequest, slug: str) -> Response:
         self.initialize_workspace(slug, type="chart")
+        if self._invalid_assignee_ids:
+            return Response({"message": "Invalid assignee_ids"}, status=status.HTTP_400_BAD_REQUEST)
         type = request.GET.get("type", "work-items")
 
         if type == "work-items":
@@ -480,7 +652,14 @@ class AdvanceAnalyticsChartEndpoint(AdvanceAnalyticsBaseView):
         return {"data": data, "schema": schema}
 
     def velocity_chart(self, weeks: int) -> Dict[str, Any]:
-        windows, committed_points, completed_points, _counts = self._velocity_series(weeks)
+        (
+            windows,
+            committed_points,
+            completed_points,
+            _counts,
+            _carryover_points,
+            _carryover_counts,
+        ) = self._velocity_series(weeks)
         data = []
         for index, (start, _end) in enumerate(windows):
             key, name = _week_meta(start)
@@ -501,8 +680,47 @@ class AdvanceAnalyticsChartEndpoint(AdvanceAnalyticsBaseView):
         }
         return {"data": data, "schema": schema}
 
+    def carryover_chart(self, weeks: int) -> Dict[str, Any]:
+        (
+            windows,
+            committed_points,
+            _completed_points,
+            _completed_counts,
+            carryover_points,
+            carryover_counts,
+        ) = self._velocity_series(weeks)
+        data = []
+        for index, (start, _end) in enumerate(windows):
+            key, name = _week_meta(start)
+            committed = committed_points[index]
+            carryover = carryover_points[index]
+            data.append(
+                {
+                    "key": key,
+                    "name": name,
+                    "committed_points": round(committed, 1),
+                    "carryover_points": round(carryover, 1),
+                    "carryover_count": carryover_counts[index],
+                    "carryover_rate": round(carryover / committed * 100, 1) if committed > 0 else 0.0,
+                }
+            )
+        schema = {
+            "committed_points": "Committed points",
+            "carryover_points": "Carryover points",
+            "carryover_count": "Carryover stories",
+            "carryover_rate": "Carryover rate",
+        }
+        return {"data": data, "schema": schema}
+
     def throughput_chart(self, weeks: int) -> Dict[str, Any]:
-        windows, _committed, _points, completed_counts = self._velocity_series(weeks)
+        (
+            windows,
+            _committed,
+            _points,
+            completed_counts,
+            _carryover_points,
+            _carryover_counts,
+        ) = self._velocity_series(weeks)
         data = []
         for index, (start, _end) in enumerate(windows):
             key, name = _week_meta(start)
@@ -524,6 +742,62 @@ class AdvanceAnalyticsChartEndpoint(AdvanceAnalyticsBaseView):
         ]
         return {"data": data, "schema": {}}
 
+    def estimate_accuracy_chart(self, weeks: int) -> Dict[str, Any]:
+        """Cycle time for completed stories grouped by their estimate point value."""
+        windows = _week_windows(weeks)
+        rows = self._completed_story_times(windows[0][0], windows[-1][1])
+
+        groups: Dict[float, Dict[str, Any]] = {}
+        started_at_map: Dict[Any, dt.datetime] = {}
+        unestimated_count = 0
+        for issue_id, _created_at, completed_at, started_at, estimate_value in rows:
+            if estimate_value in (None, ""):
+                unestimated_count += 1
+                continue
+            value = _to_float(estimate_value)
+            group = groups.get(value)
+            if group is None:
+                group = groups[value] = {"value": estimate_value, "issue_ids": [], "cycle_times": []}
+            group["issue_ids"].append(issue_id)
+            group["cycle_times"].append((completed_at - started_at).total_seconds() / 86400)
+            started_at_map[issue_id] = started_at
+
+        reestimated_ids = self._reestimated_issue_ids(started_at_map)
+
+        data = []
+        for value in sorted(groups.keys()):
+            group = groups[value]
+            cycle_times = group["cycle_times"]
+            p85 = _percentile_85(cycle_times)
+            data.append(
+                {
+                    "key": group["value"],
+                    "name": f"{group['value']} pts",
+                    "count": len(cycle_times),
+                    "median_days": round(statistics.median(cycle_times), 1),
+                    "p85_days": None if p85 is None else round(p85, 1),
+                    "min_days": round(min(cycle_times), 1),
+                    "max_days": round(max(cycle_times), 1),
+                    "reestimated_count": sum(1 for issue_id in group["issue_ids"] if issue_id in reestimated_ids),
+                }
+            )
+        return {"data": data, "unestimated_count": unestimated_count, "schema": {}}
+
+    def _reestimated_issue_ids(self, started_at_map: Dict[Any, dt.datetime]) -> set:
+        """Issue ids with an estimate-change activity created after the story's started_at."""
+        if not started_at_map:
+            return set()
+        reestimated = set()
+        activities = IssueActivity.objects.filter(
+            field__startswith="estimate_",
+            issue_id__in=list(started_at_map.keys()),
+        ).values_list("issue_id", "created_at")
+        for issue_id, created_at in activities:
+            started_at = started_at_map.get(issue_id)
+            if started_at is not None and created_at > started_at:
+                reestimated.add(issue_id)
+        return reestimated
+
     def cumulative_flow_chart(self, days: int) -> Dict[str, Any]:
         today = timezone.now().astimezone(SPRINT_TZ).date()
         day_list = [today - dt.timedelta(days=days - 1 - offset) for offset in range(days)]
@@ -535,6 +809,7 @@ class AdvanceAnalyticsChartEndpoint(AdvanceAnalyticsBaseView):
             .filter(created_at__lte=window_end)
             .select_related("state")
             .values_list("id", "created_at", "state__group")
+            .distinct()
         )
         issue_ids = [story[0] for story in stories]
         activity_map: Dict[Any, List[Any]] = {}
@@ -587,6 +862,8 @@ class AdvanceAnalyticsChartEndpoint(AdvanceAnalyticsBaseView):
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER], level="WORKSPACE")
     def get(self, request: HttpRequest, slug: str) -> Response:
         self.initialize_workspace(slug, type="chart")
+        if self._invalid_assignee_ids:
+            return Response({"message": "Invalid assignee_ids"}, status=status.HTTP_400_BAD_REQUEST)
         type = request.GET.get("type", "projects")
         group_by = request.GET.get("group_by", None)
         x_axis = request.GET.get("x_axis", "PRIORITY")
@@ -623,6 +900,12 @@ class AdvanceAnalyticsChartEndpoint(AdvanceAnalyticsBaseView):
                 return Response({"message": "Invalid weeks"}, status=status.HTTP_400_BAD_REQUEST)
             return Response(self.velocity_chart(weeks), status=status.HTTP_200_OK)
 
+        elif type == "carryover":
+            weeks = _parse_range(request.GET.get("weeks"), 8, 26)
+            if weeks is None:
+                return Response({"message": "Invalid weeks"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(self.carryover_chart(weeks), status=status.HTTP_200_OK)
+
         elif type == "throughput":
             weeks = _parse_range(request.GET.get("weeks"), 12, 26)
             if weeks is None:
@@ -634,6 +917,12 @@ class AdvanceAnalyticsChartEndpoint(AdvanceAnalyticsBaseView):
             if weeks is None:
                 return Response({"message": "Invalid weeks"}, status=status.HTTP_400_BAD_REQUEST)
             return Response(self.cycle_time_chart(weeks), status=status.HTTP_200_OK)
+
+        elif type == "estimate-accuracy":
+            weeks = _parse_range(request.GET.get("weeks"), 8, 26)
+            if weeks is None:
+                return Response({"message": "Invalid weeks"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(self.estimate_accuracy_chart(weeks), status=status.HTTP_200_OK)
 
         elif type == "cumulative-flow":
             days = _parse_range(request.GET.get("days"), 30, 90)

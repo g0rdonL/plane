@@ -43,8 +43,10 @@ export type TAnalyticsGraphsBase =
   | "work-items"
   | "custom-work-items"
   | "velocity"
+  | "carryover"
   | "throughput"
   | "cycle-time"
+  | "estimate-accuracy"
   | "cumulative-flow";
 export interface AnalyticsTab {
   key: TAnalyticsTabsBase;
@@ -54,6 +56,7 @@ export interface AnalyticsTab {
 }
 export type TAnalyticsFilterParams = {
   project_ids?: string;
+  assignee_ids?: string;
   cycle_id?: string;
   module_id?: string;
   weeks?: number;

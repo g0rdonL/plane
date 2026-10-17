@@ -60,9 +60,10 @@ const TotalInsights = observer(function TotalInsights({
   const params = useParams();
   const workspaceSlug = params.workspaceSlug.toString();
   const { t } = useTranslation();
-  const { selectedDuration, selectedProjects, selectedCycle, selectedModule, isPeekView, isEpic } = useAnalytics();
+  const { selectedDuration, selectedProjects, selectedAssignees, selectedCycle, selectedModule, isPeekView, isEpic } =
+    useAnalytics();
   const { data: totalInsightsData, isLoading } = useSWR(
-    `total-insights-${analyticsType}-${selectedDuration}-${selectedProjects}-${selectedCycle}-${selectedModule}-${isEpic}`,
+    `total-insights-${analyticsType}-${selectedDuration}-${selectedProjects}-${selectedAssignees}-${selectedCycle}-${selectedModule}-${isEpic}`,
     () =>
       analyticsService.getAdvanceAnalytics<IAnalyticsResponse>(
         workspaceSlug,
@@ -70,6 +71,9 @@ const TotalInsights = observer(function TotalInsights({
         {
           // date_filter: selectedDuration,
           ...(selectedProjects?.length > 0 ? { project_ids: selectedProjects.join(",") } : {}),
+          ...(analyticsType === "momentum" && selectedAssignees?.length > 0
+            ? { assignee_ids: selectedAssignees.join(",") }
+            : {}),
           ...(selectedCycle ? { cycle_id: selectedCycle } : {}),
           ...(selectedModule ? { module_id: selectedModule } : {}),
           ...(isEpic ? { epic: true } : {}),
@@ -94,6 +98,7 @@ const TotalInsights = observer(function TotalInsights({
           isLoading={isLoading}
           data={totalInsightsData?.[item.key]}
           label={getInsightLabel(analyticsType, item, isEpic, t)}
+          valueSuffix={item.key === "carryover_rate" ? "%" : undefined}
         />
       ))}
     </div>
