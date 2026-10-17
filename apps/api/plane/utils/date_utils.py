@@ -128,6 +128,7 @@ def get_analytics_filters(
     type: str,
     date_filter: Optional[str] = None,
     project_ids: Optional[Union[str, List[str]]] = None,
+    assignee_ids: Optional[Union[str, List[str]]] = None,
 ) -> Dict[str, Any]:
     """
     Get combined project and date filters for analytics endpoints
@@ -138,6 +139,7 @@ def get_analytics_filters(
         type: The type of filter ("analytics" or "chart")
         date_filter: Optional date filter string
         project_ids: Optional list of project IDs or comma-separated string of project IDs
+        assignee_ids: Optional list of assignee user IDs or comma-separated string of user IDs
 
     Returns:
         dict: A dictionary containing:
@@ -149,6 +151,10 @@ def get_analytics_filters(
     # Get project IDs from request
     if project_ids and isinstance(project_ids, str):
         project_ids = [str(project_id) for project_id in project_ids.split(",")]
+
+    # Get assignee IDs from request
+    if assignee_ids and isinstance(assignee_ids, str):
+        assignee_ids = [str(assignee_id) for assignee_id in assignee_ids.split(",") if assignee_id]
 
     # Base filters for workspace and user
     base_filters = {
@@ -172,6 +178,11 @@ def get_analytics_filters(
     if project_ids:
         base_filters["project_id__in"] = project_ids
         project_filters["id__in"] = project_ids
+
+    # Add assignee IDs to base filters only (not project filters) if provided
+    if assignee_ids:
+        base_filters["issue_assignee__assignee_id__in"] = assignee_ids
+        base_filters["issue_assignee__deleted_at__isnull"] = True
 
     # Initialize date range variables
     analytics_date_range = None

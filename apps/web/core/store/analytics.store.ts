@@ -14,6 +14,7 @@ export interface IBaseAnalyticsStore {
   //observables
   currentTab: TAnalyticsTabsBase;
   selectedProjects: string[];
+  selectedAssignees: string[];
   selectedDuration: DurationType;
   selectedCycle: string;
   selectedModule: string;
@@ -24,6 +25,7 @@ export interface IBaseAnalyticsStore {
 
   //actions
   updateSelectedProjects: (projects: string[]) => void;
+  updateSelectedAssignees: (assignees: string[]) => void;
   updateSelectedDuration: (duration: DurationType) => void;
   updateSelectedCycle: (cycle: string) => void;
   updateSelectedModule: (module: string) => void;
@@ -35,6 +37,7 @@ export class BaseAnalyticsStore implements IBaseAnalyticsStore {
   //observables
   currentTab: TAnalyticsTabsBase = "overview";
   selectedProjects: string[] = [];
+  selectedAssignees: string[] = [];
   selectedDuration: DurationType = "last_30_days";
   selectedCycle: string = "";
   selectedModule: string = "";
@@ -46,6 +49,7 @@ export class BaseAnalyticsStore implements IBaseAnalyticsStore {
       currentTab: observable.ref,
       selectedDuration: observable.ref,
       selectedProjects: observable,
+      selectedAssignees: observable,
       selectedCycle: observable.ref,
       selectedModule: observable.ref,
       isPeekView: observable.ref,
@@ -54,6 +58,7 @@ export class BaseAnalyticsStore implements IBaseAnalyticsStore {
       selectedDurationLabel: computed,
       // actions
       updateSelectedProjects: action,
+      updateSelectedAssignees: action,
       updateSelectedDuration: action,
       updateSelectedCycle: action,
       updateSelectedModule: action,
@@ -73,6 +78,17 @@ export class BaseAnalyticsStore implements IBaseAnalyticsStore {
       });
     } catch (error) {
       console.error("Failed to update selected project");
+      throw error;
+    }
+  };
+
+  updateSelectedAssignees = (assignees: string[]) => {
+    try {
+      runInAction(() => {
+        this.selectedAssignees = assignees;
+      });
+    } catch (error) {
+      console.error("Failed to update selected assignees");
       throw error;
     }
   };

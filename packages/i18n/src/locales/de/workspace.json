@@ -67,6 +67,7 @@
   },
   "workspace_analytics": {
     "momentum": "Momentum",
+    "all_members": "All members",
     "velocity": "Velocity",
     "throughput": "Throughput",
     "cycle_time": "Cycle time",

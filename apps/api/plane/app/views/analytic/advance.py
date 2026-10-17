@@ -4,6 +4,7 @@
 
 import datetime as dt
 import statistics
+import uuid
 from rest_framework.response import Response
 from rest_framework import status
 from typing import Dict, List, Any, Optional, Tuple
@@ -113,13 +114,30 @@ def _percentile_85(values: List[float]) -> Optional[float]:
 class AdvanceAnalyticsBaseView(BaseAPIView):
     def initialize_workspace(self, slug: str, type: str) -> None:
         self._workspace_slug = slug
+        assignee_ids = self.request.GET.get("assignee_ids", None)
+        self._invalid_assignee_ids = self._has_invalid_assignee_ids(assignee_ids)
         self.filters = get_analytics_filters(
             slug=slug,
             type=type,
             user=self.request.user,
             date_filter=self.request.GET.get("date_filter", None),
             project_ids=self.request.GET.get("project_ids", None),
+            assignee_ids=assignee_ids,
         )
+
+    @staticmethod
+    def _has_invalid_assignee_ids(assignee_ids: Optional[str]) -> bool:
+        """A comma-separated assignee id list is only valid if every id parses as a UUID."""
+        if not assignee_ids:
+            return False
+        for raw_id in str(assignee_ids).split(","):
+            if not raw_id:
+                continue
+            try:
+                uuid.UUID(raw_id)
+            except (ValueError, TypeError, AttributeError):
+                return True
+        return False
 
     def _velocity_series(self, weeks: int) -> Tuple[List[Any], List[float], List[float], List[int]]:
         """Committed/completed points and completed story counts per sprint week (oldest first)."""
@@ -143,8 +161,10 @@ class AdvanceAnalyticsBaseView(BaseAPIView):
             .exclude(issue__state__group="cancelled")
             .exclude(issue__state__group="triage")
         )
-        for key, value in self.filters["base_filters"].items():
-            committed_rows = committed_rows.filter(**{f"issue__{key}": value})
+        # Apply the workspace/user/assignee filters in a single filter() call so lookups through
+        # the same multi-valued relation (e.g. issue_assignee) share one join and can't cross-match.
+        issue_filters = {f"issue__{key}": value for key, value in self.filters["base_filters"].items()}
+        committed_rows = committed_rows.filter(**issue_filters)
         for issue_id, end_date, value in committed_rows.values_list(
             "issue_id", "cycle__end_date", "issue__estimate_point__value"
         ):
@@ -156,12 +176,20 @@ class AdvanceAnalyticsBaseView(BaseAPIView):
 
         completed_points = [0.0] * weeks
         completed_counts = [0] * weeks
-        completed_rows = base.filter(
-            state__group="completed",
-            completed_at__gte=window_start,
-            completed_at__lt=window_end,
-        ).values_list("completed_at", "estimate_point__value")
-        for completed_at, value in completed_rows:
+        completed_rows = (
+            base.filter(
+                state__group="completed",
+                completed_at__gte=window_start,
+                completed_at__lt=window_end,
+            )
+            .values_list("id", "completed_at", "estimate_point__value")
+            .distinct()
+        )
+        seen_completed = set()
+        for issue_id, completed_at, value in completed_rows:
+            if issue_id in seen_completed:
+                continue
+            seen_completed.add(issue_id)
             index = _week_index(completed_at, windows)
             if index is None:
                 continue
@@ -180,7 +208,9 @@ class AdvanceAnalyticsBaseView(BaseAPIView):
                 state__group="completed",
                 completed_at__gte=window_start,
                 completed_at__lt=window_end,
-            ).values_list("id", "created_at", "completed_at")
+            )
+            .values_list("id", "created_at", "completed_at")
+            .distinct()
         )
         if not completed:
             return [], []
@@ -293,6 +323,8 @@ class AdvanceAnalyticsEndpoint(AdvanceAnalyticsBaseView):
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER], level="WORKSPACE")
     def get(self, request: HttpRequest, slug: str) -> Response:
         self.initialize_workspace(slug, type="analytics")
+        if self._invalid_assignee_ids:
+            return Response({"message": "Invalid assignee_ids"}, status=status.HTTP_400_BAD_REQUEST)
         tab = request.GET.get("tab", "overview")
 
         if tab == "overview":
@@ -355,6 +387,8 @@ class AdvanceAnalyticsStatsEndpoint(AdvanceAnalyticsBaseView):
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER], level="WORKSPACE")
     def get(self, request: HttpRequest, slug: str) -> Response:
         self.initialize_workspace(slug, type="chart")
+        if self._invalid_assignee_ids:
+            return Response({"message": "Invalid assignee_ids"}, status=status.HTTP_400_BAD_REQUEST)
         type = request.GET.get("type", "work-items")
 
         if type == "work-items":
@@ -535,6 +569,7 @@ class AdvanceAnalyticsChartEndpoint(AdvanceAnalyticsBaseView):
             .filter(created_at__lte=window_end)
             .select_related("state")
             .values_list("id", "created_at", "state__group")
+            .distinct()
         )
         issue_ids = [story[0] for story in stories]
         activity_map: Dict[Any, List[Any]] = {}
@@ -587,6 +622,8 @@ class AdvanceAnalyticsChartEndpoint(AdvanceAnalyticsBaseView):
     @allow_permission([ROLE.ADMIN, ROLE.MEMBER], level="WORKSPACE")
     def get(self, request: HttpRequest, slug: str) -> Response:
         self.initialize_workspace(slug, type="chart")
+        if self._invalid_assignee_ids:
+            return Response({"message": "Invalid assignee_ids"}, status=status.HTTP_400_BAD_REQUEST)
         type = request.GET.get("type", "projects")
         group_by = request.GET.get("group_by", None)
         x_axis = request.GET.get("x_axis", "PRIORITY")

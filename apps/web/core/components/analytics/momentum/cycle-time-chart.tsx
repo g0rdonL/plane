@@ -26,20 +26,21 @@ const analyticsService = new AnalyticsService();
 const WEEK_OPTIONS = [4, 8, 12, 26];
 
 const CycleTimeChart = observer(function CycleTimeChart() {
-  const { selectedProjects, selectedCycle, selectedModule, isPeekView } = useAnalytics();
+  const { selectedProjects, selectedAssignees, selectedCycle, selectedModule, isPeekView } = useAnalytics();
   const params = useParams();
   const { t } = useTranslation();
   const workspaceSlug = params.workspaceSlug.toString();
   const [weeks, setWeeks] = useState(8);
 
   const { data, isLoading } = useSWR(
-    `momentum-cycle-time-${workspaceSlug}-${selectedProjects}-${selectedCycle}-${selectedModule}-${isPeekView}-${weeks}`,
+    `momentum-cycle-time-${workspaceSlug}-${selectedProjects}-${selectedAssignees}-${selectedCycle}-${selectedModule}-${isPeekView}-${weeks}`,
     () =>
       analyticsService.getAdvanceAnalyticsCharts<IChartResponse>(
         workspaceSlug,
         "cycle-time",
         {
           ...(selectedProjects?.length > 0 && { project_ids: selectedProjects.join(",") }),
+          ...(selectedAssignees?.length > 0 && { assignee_ids: selectedAssignees.join(",") }),
           ...(selectedCycle ? { cycle_id: selectedCycle } : {}),
           ...(selectedModule ? { module_id: selectedModule } : {}),
           weeks,

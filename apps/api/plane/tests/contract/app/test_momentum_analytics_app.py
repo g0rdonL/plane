@@ -18,10 +18,13 @@ from plane.db.models import (
     EstimatePoint,
     Issue,
     IssueActivity,
+    IssueAssignee,
     IssueType,
     Project,
     ProjectMember,
     State,
+    User,
+    WorkspaceMember,
 )
 from plane.utils.sprint import SPRINT_TZ
 
@@ -56,6 +59,20 @@ def make_cycle(project, user, offset, name=None):
     start, end = week_bounds(offset)
     return Cycle.objects.create(
         name=name or f"Sprint {offset}", project=project, start_date=start, end_date=end, owned_by=user
+    )
+
+
+def make_teammate(workspace, project, email="teammate@plane.so"):
+    """A second workspace + project member used as the other story assignee."""
+    user = User.objects.create(email=email, username=email.split("@")[0], first_name="Team", last_name="Mate")
+    WorkspaceMember.objects.create(workspace=workspace, member=user, role=15)
+    ProjectMember.objects.create(project=project, member=user, workspace=workspace, role=15)
+    return user
+
+
+def assign_story(issue, user):
+    return IssueAssignee.objects.create(
+        issue=issue, assignee=user, project=issue.project, workspace=issue.workspace
     )
 
 
@@ -338,3 +355,120 @@ class TestMomentumAnalytics:
             status.HTTP_401_UNAUTHORIZED,
             status.HTTP_403_FORBIDDEN,
         )
+
+
+@pytest.mark.contract
+class TestMomentumAssigneeFilter:
+    """Aight fork: momentum can be scoped to one staff member via all[issue_assignee]."""
+
+    @pytest.mark.django_db
+    def test_assignee_filter_scopes_velocity_and_tiles(self, session_client, workspace, create_user):
+        project, states, points = make_project(workspace, create_user)
+        teammate = make_teammate(workspace, project)
+        this_week = make_cycle(project, create_user, 0)
+        this_start, _ = week_bounds(0)
+        completed_at = this_start + dt.timedelta(hours=12)
+
+        mine = make_story(project, create_user, states["done"], points["4"], cycle=this_week, completed_at=completed_at)
+        assign_story(mine, create_user)
+        theirs = make_story(
+            project, create_user, states["done"], points["8"], cycle=this_week, completed_at=completed_at
+        )
+        assign_story(theirs, teammate)
+
+        # without the filter both stories count
+        unfiltered = session_client.get(charts_url(workspace), {"type": "velocity", "weeks": 1})
+        assert unfiltered.status_code == status.HTTP_200_OK, unfiltered.data
+        row = unfiltered.data["data"][-1]
+        assert (row["committed_points"], row["completed_points"]) == (12.0, 12.0)
+
+        # scoped to user1 only: committed/completed points drop to their 4
+        scoped = session_client.get(
+            charts_url(workspace), {"type": "velocity", "weeks": 1, "assignee_ids": str(create_user.id)}
+        )
+        assert scoped.status_code == status.HTTP_200_OK, scoped.data
+        row = scoped.data["data"][-1]
+        assert (row["committed_points"], row["completed_points"]) == (4.0, 4.0)
+
+        # momentum tiles honour the filter too (weeks=1 => last sprint is the current week)
+        tiles = session_client.get(momentum_url(workspace), {"tab": "momentum", "weeks": 1})
+        assert tiles.status_code == status.HTTP_200_OK, tiles.data
+        assert tiles.data["last_sprint_velocity"]["count"] == 12.0
+        assert tiles.data["avg_throughput"]["count"] == 2.0
+
+        scoped_tiles = session_client.get(
+            momentum_url(workspace), {"tab": "momentum", "weeks": 1, "assignee_ids": str(create_user.id)}
+        )
+        assert scoped_tiles.status_code == status.HTTP_200_OK, scoped_tiles.data
+        assert scoped_tiles.data["last_sprint_velocity"]["count"] == 4.0
+        assert scoped_tiles.data["avg_throughput"]["count"] == 1.0
+
+    @pytest.mark.django_db
+    def test_assignee_filter_scopes_throughput_and_cycle_time(self, session_client, workspace, create_user):
+        project, states, points = make_project(workspace, create_user)
+        teammate = make_teammate(workspace, project)
+        this_week = make_cycle(project, create_user, 0)
+        this_start, _ = week_bounds(0)
+        completed_at = this_start + dt.timedelta(days=1, hours=10)
+
+        # user1: fast (≈1 day cycle time)
+        mine = make_story(project, create_user, states["done"], points["2"], cycle=this_week, completed_at=completed_at)
+        assign_story(mine, create_user)
+        add_state_activity(
+            project, mine, states["progress"], states["backlog"],
+            completed_at - dt.timedelta(days=1), create_user,
+        )
+        # user2: slow (≈5 day cycle time)
+        theirs = make_story(project, create_user, states["done"], points["2"], cycle=this_week, completed_at=completed_at)
+        assign_story(theirs, teammate)
+        add_state_activity(
+            project, theirs, states["progress"], states["backlog"],
+            completed_at - dt.timedelta(days=5), create_user,
+        )
+
+        unfiltered = session_client.get(charts_url(workspace), {"type": "throughput", "weeks": 1})
+        assert [row["completed_count"] for row in unfiltered.data["data"]] == [2]
+        scoped = session_client.get(
+            charts_url(workspace), {"type": "throughput", "weeks": 1, "assignee_ids": str(create_user.id)}
+        )
+        assert [row["completed_count"] for row in scoped.data["data"]] == [1]
+
+        unfiltered_histogram = session_client.get(charts_url(workspace), {"type": "cycle-time", "weeks": 2})
+        counts = {row["key"]: row["count"] for row in unfiltered_histogram.data["data"]}
+        assert counts["le_1d"] == 1
+        assert counts["d4_7"] == 1
+        scoped_histogram = session_client.get(
+            charts_url(workspace), {"type": "cycle-time", "weeks": 2, "assignee_ids": str(create_user.id)}
+        )
+        scoped_counts = {row["key"]: row["count"] for row in scoped_histogram.data["data"]}
+        assert scoped_counts == {"le_1d": 1, "d2_3": 0, "d4_7": 0, "d8_14": 0, "gt_14": 0}
+
+    @pytest.mark.django_db
+    def test_assignee_filter_scopes_cumulative_flow(self, session_client, workspace, create_user):
+        project, states, _points = make_project(workspace, create_user)
+        teammate = make_teammate(workspace, project)
+        today = timezone.now().astimezone(SPRINT_TZ).date()
+        created_at = dt.datetime.combine(today, dt.time(hour=9), tzinfo=SPRINT_TZ)
+
+        mine = make_story(project, create_user, states["todo"], created_at=created_at)
+        assign_story(mine, create_user)
+        theirs = make_story(project, create_user, states["todo"], created_at=created_at)
+        assign_story(theirs, teammate)
+
+        unfiltered = session_client.get(charts_url(workspace), {"type": "cumulative-flow", "days": 1})
+        assert unfiltered.data["data"][-1]["unstarted"] == 2
+        scoped = session_client.get(
+            charts_url(workspace), {"type": "cumulative-flow", "days": 1, "assignee_ids": str(create_user.id)}
+        )
+        assert scoped.status_code == status.HTTP_200_OK, scoped.data
+        assert scoped.data["data"][-1]["unstarted"] == 1
+
+    @pytest.mark.django_db
+    def test_invalid_assignee_ids_return_400(self, session_client, workspace, create_user):
+        make_project(workspace, create_user)
+        assert session_client.get(
+            momentum_url(workspace), {"tab": "momentum", "assignee_ids": "not-a-uuid"}
+        ).status_code == status.HTTP_400_BAD_REQUEST
+        assert session_client.get(
+            charts_url(workspace), {"type": "velocity", "assignee_ids": "not-a-uuid"}
+        ).status_code == status.HTTP_400_BAD_REQUEST

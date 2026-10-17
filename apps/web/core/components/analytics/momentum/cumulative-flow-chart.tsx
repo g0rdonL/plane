@@ -27,20 +27,21 @@ const analyticsService = new AnalyticsService();
 const DAY_OPTIONS = [30, 60, 90];
 
 const CumulativeFlowChart = observer(function CumulativeFlowChart() {
-  const { selectedProjects, selectedCycle, selectedModule, isPeekView } = useAnalytics();
+  const { selectedProjects, selectedAssignees, selectedCycle, selectedModule, isPeekView } = useAnalytics();
   const params = useParams();
   const { t } = useTranslation();
   const workspaceSlug = params.workspaceSlug.toString();
   const [days, setDays] = useState(30);
 
   const { data, isLoading } = useSWR(
-    `momentum-cumulative-flow-${workspaceSlug}-${selectedProjects}-${selectedCycle}-${selectedModule}-${isPeekView}-${days}`,
+    `momentum-cumulative-flow-${workspaceSlug}-${selectedProjects}-${selectedAssignees}-${selectedCycle}-${selectedModule}-${isPeekView}-${days}`,
     () =>
       analyticsService.getAdvanceAnalyticsCharts<IChartResponse>(
         workspaceSlug,
         "cumulative-flow",
         {
           ...(selectedProjects?.length > 0 && { project_ids: selectedProjects.join(",") }),
+          ...(selectedAssignees?.length > 0 && { assignee_ids: selectedAssignees.join(",") }),
           ...(selectedCycle ? { cycle_id: selectedCycle } : {}),
           ...(selectedModule ? { module_id: selectedModule } : {}),
           days,
