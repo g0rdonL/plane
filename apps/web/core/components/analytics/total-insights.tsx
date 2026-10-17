@@ -94,6 +94,7 @@ const TotalInsights = observer(function TotalInsights({
           isLoading={isLoading}
           data={totalInsightsData?.[item.key]}
           label={getInsightLabel(analyticsType, item, isEpic, t)}
+          valueSuffix={item.key === "carryover_rate" ? "%" : undefined}
         />
       ))}
     </div>
