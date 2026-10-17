@@ -118,6 +118,10 @@ export const ANALYTICS_INSIGHTS_FIELDS: Record<TAnalyticsTabsBase, IInsightField
       i18nKey: "workspace_analytics.avg_throughput",
     },
     {
+      key: "carryover_rate",
+      i18nKey: "workspace_analytics.carryover_rate",
+    },
+    {
       key: "median_cycle_time",
       i18nKey: "workspace_analytics.median_cycle_time",
     },

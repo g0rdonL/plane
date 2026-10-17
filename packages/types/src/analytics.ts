@@ -43,6 +43,7 @@ export type TAnalyticsGraphsBase =
   | "work-items"
   | "custom-work-items"
   | "velocity"
+  | "carryover"
   | "throughput"
   | "cycle-time"
   | "cumulative-flow";

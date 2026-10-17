@@ -37,6 +37,11 @@ def week_bounds(offset):
     return start, start + dt.timedelta(days=7) - dt.timedelta(seconds=1)
 
 
+def week_key(start):
+    iso = start.date().isocalendar()
+    return f"{iso.year}-W{iso.week:02d}"
+
+
 def make_project(workspace, user, identifier="AAA"):
     project = Project.objects.create(name=identifier, identifier=identifier, workspace=workspace, created_by=user)
     ProjectMember.objects.create(project=project, member=user, workspace=workspace, role=20)
@@ -105,6 +110,16 @@ def add_state_activity(project, issue, new_state, old_state, occurred_at, user):
     activity = IssueActivity.objects.create(
         issue=issue, project=project, workspace=project.workspace, verb="updated", field="state",
         old_identifier=old_state.id, new_identifier=new_state.id, actor=user,
+    )
+    IssueActivity.objects.filter(pk=activity.pk).update(created_at=occurred_at)
+    return activity
+
+
+def add_cycle_activity(project, issue, verb, occurred_at, user, old_cycle=None, new_cycle=None):
+    activity = IssueActivity.objects.create(
+        issue=issue, project=project, workspace=project.workspace, verb=verb, field="cycles",
+        old_identifier=old_cycle.id if old_cycle is not None else None,
+        new_identifier=new_cycle.id if new_cycle is not None else None, actor=user,
     )
     IssueActivity.objects.filter(pk=activity.pk).update(created_at=occurred_at)
     return activity
@@ -349,6 +364,139 @@ class TestMomentumAnalytics:
         assert session_client.get(charts_url(workspace), {"type": "bogus"}).status_code == (
             status.HTTP_400_BAD_REQUEST
         )
+
+    @pytest.mark.django_db
+    def test_carryover_story_moved_to_next_cycle_counts_in_both(self, session_client, workspace, create_user):
+        project, states, points = make_project(workspace, create_user)
+        last_week = make_cycle(project, create_user, -1)
+        this_week = make_cycle(project, create_user, 0)
+        last_start, _ = week_bounds(-1)
+        this_start, _ = week_bounds(0)
+
+        story = make_story(project, create_user, states["todo"], points["4"], cycle=last_week)
+        add_cycle_activity(
+            project, story, "created", last_start + dt.timedelta(hours=1), create_user, new_cycle=last_week
+        )
+        # carried over into this week's cycle after last week closed (CycleIssue row overwritten in place)
+        add_cycle_activity(
+            project, story, "updated", this_start + dt.timedelta(hours=1), create_user,
+            old_cycle=last_week, new_cycle=this_week,
+        )
+        CycleIssue.objects.filter(issue=story, cycle=last_week).update(cycle=this_week)
+
+        chart = session_client.get(charts_url(workspace), {"type": "carryover", "weeks": 3})
+        assert chart.status_code == status.HTTP_200_OK, chart.data
+        rows = {row["key"]: row for row in chart.data["data"]}
+        assert rows[week_key(last_start)]["committed_points"] == 4.0
+        assert rows[week_key(last_start)]["carryover_points"] == 4.0
+        assert rows[week_key(last_start)]["carryover_count"] == 1
+        # and it is committed to this week's cycle too
+        assert rows[week_key(this_start)]["committed_points"] == 4.0
+
+    @pytest.mark.django_db
+    def test_carryover_excludes_story_completed_before_close(self, session_client, workspace, create_user):
+        project, states, points = make_project(workspace, create_user)
+        last_week = make_cycle(project, create_user, -1)
+        last_start, _ = week_bounds(-1)
+        make_story(
+            project, create_user, states["done"], points["4"], cycle=last_week,
+            completed_at=last_start + dt.timedelta(hours=12),
+        )
+
+        chart = session_client.get(charts_url(workspace), {"type": "carryover", "weeks": 2})
+        assert chart.status_code == status.HTTP_200_OK, chart.data
+        row = {r["key"]: r for r in chart.data["data"]}[week_key(last_start)]
+        assert row["committed_points"] == 4.0
+        assert row["carryover_points"] == 0.0
+        assert row["carryover_count"] == 0
+
+    @pytest.mark.django_db
+    def test_carryover_excludes_story_removed_before_close(self, session_client, workspace, create_user):
+        project, states, points = make_project(workspace, create_user)
+        last_week = make_cycle(project, create_user, -1)
+        last_start, _ = week_bounds(-1)
+        story = make_story(project, create_user, states["todo"], points["4"], cycle=last_week)
+        add_cycle_activity(
+            project, story, "created", last_start + dt.timedelta(hours=1), create_user, new_cycle=last_week
+        )
+        add_cycle_activity(
+            project, story, "deleted", last_start + dt.timedelta(days=2), create_user, old_cycle=last_week
+        )
+        CycleIssue.objects.filter(issue=story, cycle=last_week).delete()
+
+        chart = session_client.get(charts_url(workspace), {"type": "carryover", "weeks": 2})
+        assert chart.status_code == status.HTTP_200_OK, chart.data
+        row = {r["key"]: r for r in chart.data["data"]}[week_key(last_start)]
+        assert row["committed_points"] == 0.0
+        assert row["carryover_points"] == 0.0
+        assert row["carryover_count"] == 0
+
+    @pytest.mark.django_db
+    def test_carryover_excludes_story_added_after_close(self, session_client, workspace, create_user):
+        project, states, points = make_project(workspace, create_user)
+        last_week = make_cycle(project, create_user, -1)
+        this_start, _ = week_bounds(0)
+        story = make_story(project, create_user, states["todo"], points["4"], cycle=last_week)
+        # only added to last week's cycle after it had already closed
+        add_cycle_activity(
+            project, story, "created", this_start + dt.timedelta(hours=1), create_user, new_cycle=last_week
+        )
+
+        chart = session_client.get(charts_url(workspace), {"type": "carryover", "weeks": 2})
+        assert chart.status_code == status.HTTP_200_OK, chart.data
+        row = {r["key"]: r for r in chart.data["data"]}[week_key(this_start - dt.timedelta(days=7))]
+        assert row["committed_points"] == 0.0
+        assert row["carryover_count"] == 0
+
+    @pytest.mark.django_db
+    def test_carryover_chart_shape_and_rate(self, session_client, workspace, create_user):
+        project, states, points = make_project(workspace, create_user)
+        last_week = make_cycle(project, create_user, -1)
+        last_start, _ = week_bounds(-1)
+        # completed before close: committed, not carryover
+        make_story(
+            project, create_user, states["done"], points["4"], cycle=last_week,
+            completed_at=last_start + dt.timedelta(hours=6),
+        )
+        # unfinished: committed and carryover
+        make_story(project, create_user, states["todo"], points["4"], cycle=last_week)
+
+        chart = session_client.get(charts_url(workspace), {"type": "carryover", "weeks": 2})
+        assert chart.status_code == status.HTTP_200_OK, chart.data
+        rows = {row["key"]: row for row in chart.data["data"]}
+        row = rows[week_key(last_start)]
+        assert {
+            "key", "name", "committed_points", "carryover_points", "carryover_count", "carryover_rate",
+        } <= set(row)
+        assert (row["committed_points"], row["carryover_points"], row["carryover_count"]) == (8.0, 4.0, 1)
+        assert row["carryover_rate"] == 50.0
+        assert "carryover_rate" in chart.data["schema"]
+        # a week with no committed work reports a zero rate, not a division error
+        assert rows[week_key(last_start + dt.timedelta(days=7))]["carryover_rate"] == 0.0
+
+        assert session_client.get(charts_url(workspace), {"type": "carryover", "weeks": 99}).status_code == (
+            status.HTTP_400_BAD_REQUEST
+        )
+
+    @pytest.mark.django_db
+    def test_momentum_carryover_tile(self, session_client, workspace, create_user):
+        project, states, points = make_project(workspace, create_user)
+        last_week = make_cycle(project, create_user, -1)
+        last_start, _ = week_bounds(-1)
+        make_story(
+            project, create_user, states["done"], points["4"], cycle=last_week,
+            completed_at=last_start + dt.timedelta(hours=6),
+        )
+        make_story(project, create_user, states["todo"], points["4"], cycle=last_week)
+
+        response = session_client.get(momentum_url(workspace), {"tab": "momentum", "weeks": 3})
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert "carryover_rate" in response.data
+
+        chart = session_client.get(charts_url(workspace), {"type": "carryover", "weeks": 3})
+        assert chart.status_code == status.HTTP_200_OK, chart.data
+        rates = [row["carryover_rate"] for row in chart.data["data"]][-3:]
+        assert response.data["carryover_rate"]["count"] == round(sum(rates) / len(rates), 1)
 
     def test_requires_login(self, api_client, workspace):
         assert api_client.get(momentum_url(workspace), {"tab": "momentum"}).status_code in (
